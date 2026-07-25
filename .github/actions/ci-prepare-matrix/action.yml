@@ -1,0 +1,83 @@
+# Computes the platform matrix used by rbfx engine and downstream-project workflows.
+# It is a pure planning action: it validates inputs and writes JSON outputs, but does
+# not check out repositories, install tools, download artifacts, or run builds.
+#
+# The action performs these transformations:
+# 1. Validate `profile` as `engine` or `downstream`. The profile records workflow
+#    intent; both profiles currently select from the same supported platform list.
+# 2. Parse `platforms`. `all` selects every supported tag. Comma-separated partial
+#    selectors such as `linux`, `clang-x64`, or `windows-dll` match tags containing
+#    all named components. Tokens prefixed by `-` remove their matches. Unknown
+#    selectors and a selection left empty after exclusions are errors.
+# 3. Preserve the normalized input selector tokens as `requested_platform_tags`, and
+#    expose their expanded result as `platform_tags`. A matrix row's `requested` flag
+#    is true only when its complete platform tag appeared verbatim in the input; broad
+#    selectors such as `all` or `linux` expand rows but do not mark them as explicit.
+# 4. Parse `build_types` entries in `<platform>:<short-name>:<build-type-name>`
+#    form. `*` entries provide defaults. If a platform has explicit entries, they
+#    replace all `*` defaults for that platform. `platforms` remains the sole matrix
+#    selector: a platform selector expands to every mapped build type, while a short
+#    build-type suffix such as `linux-gcc-x64-dll-dbg` selects only that mapping.
+# 5. Assign `windows-latest` to Windows and UWP tags, `macos-latest` to macOS and
+#    iOS tags, and `ubuntu-latest` to Linux, Android, and Web tags. Resolve
+#    `ci_host_platform_tag` to Linux for Android/Web, macOS x64 for iOS, Windows x64
+#    for UWP, and the target platform itself for native builds. Its platform and
+#    platform, compiler, and architecture components are also exposed as
+#    `ci_host_platform`, `ci_host_compiler`, and `ci_host_arch`.
+# 6. Emit two matrices in `{ "include": [...] }` form. `platform_matrix` groups the
+#    selected short-name-to-build-name mappings in `ci_build_types`, producing one
+#    row per platform. `build_matrix` flattens them into separate rows containing
+#    `ci_build_type` and `ci_build_type_name`. Callers choose their job granularity.
+name: CI Prepare Matrix
+description: Prepare an rbfx CI platform matrix.
+
+inputs:
+  profile:
+    description: "Workflow profile. Supported values: `engine`, `downstream`."
+    required: false
+    default: downstream
+  platforms:
+    description: >-
+      Platform selector. Supported values: `all`, comma-separated platform selectors,
+      and exclusions prefixed with `-`, for example `windows,linux,-web` or
+      `linux-gcc-x64-dll`. Append a configured short build type to select one
+      configuration, for example `linux-gcc-x64-dll-dbg`; without a suffix, all
+      mapped build types are selected.
+    required: false
+    default: all
+  build_types:
+    description: >-
+      Build configurations, one per line in
+      `<platform>:<short-name>:<build-type-name>` form. `*` supplies defaults;
+      platform-specific entries replace the defaults for that platform.
+    required: false
+    default: |
+      *:dbg:Debug
+      *:rel:RelWithDebInfo
+      android:dbg:assembleDebug
+      android:rel:assembleRelease
+outputs:
+  requested_platform_tags:
+    description: JSON array of platform/build-type selectors requested through platforms.
+    value: ${{ steps.prepare.outputs.requested_platform_tags }}
+  platform_tags:
+    description: JSON array of selected platform tags.
+    value: ${{ steps.prepare.outputs.platform_tags }}
+  platform_matrix:
+    description: JSON object suitable for strategy.matrix, with one row per platform and selected mappings in ci_build_types.
+    value: ${{ steps.prepare.outputs.platform_matrix }}
+  build_matrix:
+    description: JSON object suitable for strategy.matrix, with one row per platform/build type and singular ci_build_type and ci_build_type_name fields.
+    value: ${{ steps.prepare.outputs.build_matrix }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate inputs and filter matrix
+      id: prepare
+      shell: bash
+      env:
+        INPUT_PROFILE: ${{ inputs.profile }}
+        INPUT_PLATFORMS: ${{ inputs.platforms }}
+        INPUT_BUILD_TYPES: ${{ inputs.build_types }}
+      run: python3 "$GITHUB_ACTION_PATH/../../../script/ci_prepare_matrix.py"
