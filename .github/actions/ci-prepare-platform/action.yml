@@ -98,7 +98,7 @@ runs:
         value = json.loads(sys.argv[1])
         if not isinstance(value, dict) or not value:
             raise SystemExit("build_types must be a non-empty JSON object")
-        print(json.dumps(value, separators=(",", ":")))
+        sys.stdout.buffer.write(json.dumps(value, separators=(",", ":")).encode("utf-8"))
         ' "$ci_build_types_value")"
         fi
         ci_source_path_value="${ci_source_path:-}"

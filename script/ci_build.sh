@@ -253,6 +253,7 @@ except json.JSONDecodeError as error:
     raise SystemExit(f"invalid ci_build_types JSON object: {error}")
 if not isinstance(build_types, dict) or not build_types:
     raise SystemExit("ci_build_types must be a non-empty JSON object")
+rows = []
 for short_name, build_type_name in build_types.items():
     if (
         not isinstance(short_name, str)
@@ -262,7 +263,8 @@ for short_name, build_type_name in build_types.items():
         or any(char in short_name + build_type_name for char in "\r\n\t")
     ):
         raise SystemExit("ci_build_types keys and values must be non-empty strings without control whitespace")
-    print(f"{short_name}\t{build_type_name}")
+    rows.append(f"{short_name}\t{build_type_name}")
+sys.stdout.buffer.write(("\n".join(rows) + "\n").encode("utf-8"))
 ' "${ci_build_types:-$default_build_types}")
 if [[ ${#configured_build_type_ids[@]} -eq 0 ]]; then
     echo 'Error: ci_build_types did not define any usable build types'
@@ -1712,6 +1714,17 @@ function action-setup-environment() {
     fi
 
     # Define env variables
+    case "$ci_platform" in
+        linux|android|web)
+            ci_number_of_processors=$(nproc)
+            ;;
+        macos|ios)
+            ci_number_of_processors=$(sysctl -n hw.ncpu)
+            ;;
+        windows|uwp)
+            ci_number_of_processors=${NUMBER_OF_PROCESSORS:-1}
+            ;;
+    esac
     ci_short_sha=$(echo ${GITHUB_SHA} | cut -c1-8)
     ci_hash_thirdparty=''
     if [[ "${ci_profile:-engine}" == 'engine' ]]; then
