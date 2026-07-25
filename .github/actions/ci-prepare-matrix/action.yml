@@ -5,10 +5,10 @@
 # The action performs these transformations:
 # 1. Validate `profile` as `engine` or `downstream`. The profile records workflow
 #    intent; both profiles currently select from the same supported platform list.
-# 2. Parse `platforms`. `all` selects every supported tag. Comma-separated partial
-#    selectors such as `linux`, `clang-x64`, or `windows-dll` match tags containing
-#    all named components. Tokens prefixed by `-` remove their matches. Unknown
-#    selectors and a selection left empty after exclusions are errors.
+# 2. Parse `platforms`, one selector per line. `all` selects every supported tag.
+#    Partial selectors such as `linux`, `clang-x64`, or `windows-dll` match tags
+#    containing all named components. Tokens prefixed by `-` remove their matches.
+#    Unknown selectors and a selection left empty after exclusions are errors.
 # 3. Preserve the normalized input selector tokens as `requested_platform_tags`, and
 #    expose their expanded result as `platform_tags`. A matrix row's `requested` flag
 #    is true only when its complete platform tag appeared verbatim in the input; broad
@@ -38,11 +38,10 @@ inputs:
     default: downstream
   platforms:
     description: >-
-      Platform selector. Supported values: `all`, comma-separated platform selectors,
-      and exclusions prefixed with `-`, for example `windows,linux,-web` or
-      `linux-gcc-x64-dll`. Append a configured short build type to select one
-      configuration, for example `linux-gcc-x64-dll-dbg`; without a suffix, all
-      mapped build types are selected.
+      Platform selectors, one per line. Supported values include `all`, partial or
+      complete platform selectors, and exclusions prefixed with `-`. Append a
+      configured short build type to select one configuration, for example
+      `linux-gcc-x64-dll-dbg`; without a suffix, all mapped build types are selected.
     required: false
     default: all
   build_types:

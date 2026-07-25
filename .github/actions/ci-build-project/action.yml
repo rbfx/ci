@@ -1,6 +1,8 @@
 # Builds and optionally installs one downstream project. Run ci-prepare-platform
 # earlier in the same job: this action consumes the platform, toolchain, cache, and
-# CMake prefix environment prepared by that action.
+# CMake prefix environment prepared by that action. ci-prepare-matrix is optional:
+# callers may provide ci_platform_tag directly to ci-prepare-platform and select the
+# platform-specific configurations built here through build_types.
 #
 # The caller owns repository checkout, framework acquisition, and artifact upload.
 # Framework source trees and SDKs are selected entirely through the prepared CMake
@@ -24,12 +26,16 @@ inputs:
     description: "Optional install directory, absolute or relative to `github.workspace`. Empty disables installation for non-Android builds; Android defaults to the prepared platform-specific project install directory."
     required: false
     default: ''
-  android_dir:
-    description: "Path to the downstream Android Gradle project, relative to `project_dir`."
+  build_types:
+    description: "Optional build configurations, one `<platform>:<short-name>:<configuration>` mapping per line. `*` supplies defaults; entries for the active platform replace all defaults. Empty uses the mapping prepared by ci-prepare-platform."
     required: false
     default: ''
-  android_gradle_task:
-    description: "Optional single Gradle task override. By default, execute the selected build_types mappings."
+  cmake_cache_vars:
+    description: "CMake cache variables to pass to the configure step, one `NAME=VALUE` or `NAME:TYPE=VALUE` per line."
+    required: false
+    default: ''
+  android_dir:
+    description: "Path to the downstream Android Gradle project, relative to `project_dir`."
     required: false
     default: ''
 outputs:
@@ -51,6 +57,7 @@ runs:
         INPUT_BUILD_DIR: ${{ inputs.build_dir }}
         INPUT_INSTALL_DIR: ${{ inputs.install_dir }}
         INPUT_ANDROID_DIR: ${{ inputs.android_dir }}
+        INPUT_BUILD_TYPES: ${{ inputs.build_types }}
       run: |
         ci_build_script="$GITHUB_ACTION_PATH/../../../script/ci_build.sh"
 
@@ -82,11 +89,61 @@ runs:
           project_install_dir="${GITHUB_WORKSPACE}/project-install/${ci_platform_tag}"
         fi
 
+        if [[ -n "$INPUT_BUILD_TYPES" ]]; then
+          ci_build_types="$(python3 -c '
+        import json
+        import sys
+
+        supported_platforms = {
+            "windows", "linux", "macos", "uwp", "android", "ios", "web"
+        }
+        default_mappings = {}
+        platform_mappings = {}
+        for line_number, raw_line in enumerate(sys.argv[1].splitlines(), start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+            parts = [part.strip() for part in line.split(":", maxsplit=2)]
+            if len(parts) != 3 or any(not part for part in parts):
+                raise SystemExit(
+                    f"Invalid build_types entry on line {line_number}: {raw_line!r}. "
+                    "Expected <platform>:<short-name>:<configuration>."
+                )
+            platform, short_name, configuration = parts
+            if platform != "*" and platform not in supported_platforms:
+                raise SystemExit(
+                    f"Unsupported build_types platform on line {line_number}: "
+                    f"{platform}"
+                )
+            mappings = (
+                default_mappings if platform == "*" else
+                platform_mappings.setdefault(platform, {})
+            )
+            if short_name in mappings:
+                raise SystemExit(
+                    f"Duplicate build_types mapping on line {line_number}: "
+                    f"{platform}:{short_name}"
+                )
+            mappings[short_name] = configuration
+        active_platform = sys.argv[2]
+        mappings = platform_mappings.get(active_platform, default_mappings)
+        if not mappings:
+            raise SystemExit(
+                f"build_types does not define configurations for platform "
+                f"{active_platform!r}; provide `{active_platform}` or `*` entries"
+            )
+        sys.stdout.write(json.dumps(mappings, separators=(",", ":")))
+        ' "$INPUT_BUILD_TYPES" "$ci_platform")"
+        fi
+
         {
           printf 'ci_build_script=%s\n' "$ci_build_script"
           printf 'project_source_dir=%s\n' "$project_source_dir"
           printf 'ci_active_project_build_dir=%s\n' "$active_project_build_dir"
           printf 'ci_project_install_dir=%s\n' "$project_install_dir"
+          if [[ -n "$INPUT_BUILD_TYPES" ]]; then
+            printf 'ci_build_types=%s\n' "$ci_build_types"
+          fi
         } >> "$GITHUB_ENV"
         {
           printf 'build_dir=%s\n' "$active_project_build_dir"
@@ -96,24 +153,29 @@ runs:
     - name: Build downstream project
       if: env.ci_platform != 'android'
       shell: bash
+      env:
+        INPUT_CMAKE_CACHE_VARS: ${{ inputs.cmake_cache_vars }}
       run: |
         args=(build-project --build-dir "$ci_active_project_build_dir")
         if [[ -n "$ci_project_install_dir" ]]; then
           args+=(--install-dir "$ci_project_install_dir")
         fi
-        "$ci_build_script" "${args[@]}" "$project_source_dir"
+        cmake_args=()
+        while IFS= read -r cmake_cache_var || [[ -n "$cmake_cache_var" ]]; do
+          cmake_cache_var="${cmake_cache_var%$'\r'}"
+          if [[ -n "$cmake_cache_var" ]]; then
+            cmake_args+=("-D$cmake_cache_var")
+          fi
+        done <<< "$INPUT_CMAKE_CACHE_VARS"
+        "$ci_build_script" "${args[@]}" "$project_source_dir" -- "${cmake_args[@]}"
 
     - name: Build downstream Android project
       if: env.ci_platform == 'android'
       shell: bash
       env:
-        INPUT_ANDROID_GRADLE_TASK: ${{ inputs.android_gradle_task }}
         INPUT_ANDROID_DIR: ${{ inputs.android_dir }}
       run: |
         args=(build-android-project)
-        if [[ -n "$INPUT_ANDROID_GRADLE_TASK" ]]; then
-          args+=(--gradle-task "$INPUT_ANDROID_GRADLE_TASK")
-        fi
         android_project_dir="$project_source_dir/$INPUT_ANDROID_DIR"
         "$ci_build_script" "${args[@]}" "$android_project_dir"
 

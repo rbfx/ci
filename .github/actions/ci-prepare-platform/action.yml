@@ -3,12 +3,14 @@
 # and exports its state through the job environment and the outputs listed below.
 #
 # Configuration:
-# 1. Resolve `ci_platform_tag` and the grouped `ci_build_types` matrix mapping into
-#    the platform, configurations, architecture, compiler, linkage, cache identity,
-#    build directories, and other shared CI variables by using `ci_build.sh` from
-#    this action's own repository checkout. This keeps action logic pinned to the
-#    same repository and ref as the action. Defaults such as CMake/.NET versions and
-#    ccache behavior are exported through `GITHUB_ENV`.
+# 1. Resolve `ci_platform_tag` from an explicit input, a matrix row, or the job
+#    environment. ci-prepare-matrix is optional. Resolve the grouped `ci_build_types`
+#    mapping the same way, then derive the platform, configurations, architecture,
+#    compiler, linkage, cache identity, build directories, and other shared CI
+#    variables by using `ci_build.sh` from this action's own repository checkout.
+#    This keeps action logic pinned to the same repository and ref as the action.
+#    Defaults such as CMake/.NET versions and ccache behavior are exported through
+#    `GITHUB_ENV`.
 # 2. For `downstream`, resolve the caller-provided CMake prefixes. Existing paths
 #    are preserved in caller order and missing paths are ignored. Web jobs export
 #    them through `CMAKE_FIND_ROOT_PATH`; all other jobs use `CMAKE_PREFIX_PATH`.

@@ -44,9 +44,9 @@ def require_env(name: str) -> str:
     return value
 
 
-def parse_csv_env(name: str) -> list[str]:
+def parse_multiline_env(name: str) -> list[str]:
     raw_value = require_env(name)
-    return [value.strip() for value in raw_value.split(',') if value.strip()]
+    return [value.strip() for value in raw_value.splitlines() if value.strip()]
 
 
 def validate_choice(name: str, value: str, supported_values: set[str]) -> None:
@@ -359,7 +359,7 @@ def main() -> None:
     profile = os.environ.get('INPUT_PROFILE', 'downstream').strip() or 'downstream'
     validate_choice('profile', profile, {'engine', 'downstream'})
 
-    requested_platform_tags = parse_csv_env('INPUT_PLATFORMS')
+    requested_platform_tags = parse_multiline_env('INPUT_PLATFORMS')
     build_types = parse_build_types(
         os.environ.get('INPUT_BUILD_TYPES', DEFAULT_BUILD_TYPES)
     )
