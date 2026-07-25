@@ -470,6 +470,7 @@ prepare-project-search-paths() {
     project_cmake_prefix_variable='CMAKE_PREFIX_PATH'
     project_cmake_prefix_value="${CI_CMAKE_PREFIX_PATH:-}"
     project_urho3d_dir="${Urho3D_DIR:-}"
+    project_toolchain_dir="${RBFX_TOOLCHAIN_DIR:-}"
     if [[ "$ci_platform" == 'web' ]]; then
         project_cmake_prefix_variable='CMAKE_FIND_ROOT_PATH'
     fi
@@ -535,8 +536,12 @@ prepare-project-cmake-args() {
             project_cmake_args+=('-DCMAKE_C_COMPILER_LAUNCHER=ccache' '-DCMAKE_CXX_COMPILER_LAUNCHER=ccache')
             ;;
         ios)
+            if [[ ! -f "${project_toolchain_dir}/IOS.cmake" ]]; then
+                echo "Error: iOS toolchain was not found in the selected rbfx package: ${project_toolchain_dir}/IOS.cmake"
+                return 1
+            fi
             project_cmake_args+=(-G Xcode)
-            project_cmake_args+=("-DCMAKE_TOOLCHAIN_FILE=${ci_support_dir}/CMake/Toolchains/IOS.cmake")
+            project_cmake_args+=("-DCMAKE_TOOLCHAIN_FILE=${project_toolchain_dir}/IOS.cmake")
             project_cmake_args+=('-DDEPLOYMENT_TARGET=12')
             project_cmake_args+=('-DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO')
             case "$ci_arch" in
@@ -1455,6 +1460,8 @@ function action-resolve-cmake-prefix-path() {
     local cmake_prefix_path=''
     local android_java_dir=''
     local urho3d_dir=''
+    local urho3d_prefix_path=''
+    local toolchain_dir=''
     local candidate=''
     local bin_dir=''
     local executable_dir=''
@@ -1524,6 +1531,7 @@ function action-resolve-cmake-prefix-path() {
         candidate="$(normalize-path "$prefix_path/Urho3D/share/Urho3D")"
         if [[ -f "$candidate/Urho3DConfig.cmake" ]]; then
             urho3d_dir="$candidate"
+            urho3d_prefix_path="$prefix_path"
             break
         fi
     done
@@ -1535,11 +1543,23 @@ function action-resolve-cmake-prefix-path() {
                 candidate="$(normalize-path "$candidate")"
                 if [[ -f "$candidate/Urho3DConfig.cmake" ]]; then
                     urho3d_dir="$candidate"
+                    urho3d_prefix_path="$prefix_path"
                     break 2
                 fi
             done
         done
     fi
+
+    for candidate in \
+        "$urho3d_prefix_path/Toolchains" \
+        "$urho3d_prefix_path/share/Urho3D/CMake/Toolchains" \
+        "$urho3d_prefix_path/Urho3D/CMake/Toolchains"; do
+        candidate="$(normalize-path "$candidate")"
+        if [[ -d "$candidate" ]]; then
+            toolchain_dir="$candidate"
+            break
+        fi
+    done
 
     cmake_prefix_path="$(IFS=';'; echo "${resolved_prefix_paths[*]}")"
     if [[ "$ci_platform" == 'web' ]]; then
@@ -1549,6 +1569,7 @@ function action-resolve-cmake-prefix-path() {
     write-github-env CI_CMAKE_PREFIX_PATH "$cmake_prefix_path"
     write-github-env "$cmake_variable" "$cmake_prefix_path"
     write-github-env Urho3D_DIR "$urho3d_dir"
+    write-github-env RBFX_TOOLCHAIN_DIR "$toolchain_dir"
     write-github-env RBFX_ANDROID_JAVA_DIR "$android_java_dir"
     write-github-output cmake_prefix_path "$cmake_prefix_path"
     write-github-output cmake_variable "$cmake_variable"
