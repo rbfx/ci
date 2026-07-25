@@ -122,7 +122,7 @@ runs:
           fi
 
           ci_source_path_value='.'
-          ci_source_dir_value="$action_repo_root"
+          ci_source_dir_value="$project_source_dir_value"
         else
           project_source_dir_value="${project_source_dir_value:-${GITHUB_WORKSPACE}}"
           if [[ -z "$ci_source_path_value" ]]; then
@@ -147,9 +147,11 @@ runs:
           printf 'CCACHE_NOHASHDIR=%s\n' "${CCACHE_NOHASHDIR:-true}"
           printf 'CCACHE_LIMIT_MULTIPLE=%s\n' "${CCACHE_LIMIT_MULTIPLE:-0.6}"
           printf 'ccache_prefix=%s\n' "${ccache_prefix:-${DEFAULT_CCACHE_PREFIX}}"
+          printf 'ci_profile=%s\n' "${{ inputs.profile }}"
           printf 'ci_platform_tag=%s\n' "$ci_platform_tag_value"
           printf 'ci_build_types=%s\n' "$ci_build_types_value"
           printf 'ci_workspace_dir=%s\n' "${ci_workspace_dir:-${GITHUB_WORKSPACE}}"
+          printf 'ci_support_dir=%s\n' "$action_repo_root"
           printf 'ci_source_path=%s\n' "$ci_source_path_value"
           printf 'ci_source_dir=%s\n' "$ci_source_dir_value"
           printf 'ci_build_script=%s\n' "$ci_build_script_value"

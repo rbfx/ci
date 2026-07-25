@@ -18,7 +18,10 @@
 #   ci_lib_type:      lib|dll
 #   ci_platform_tag:  platform-compiler-arch-libtype (e.g., android-clang-arm64-dll)
 #   ci_workspace_dir: actions workspace directory
-#   ci_source_dir:    source code directory
+#   ci_source_dir:    engine source directory for engine actions, project source
+#                     directory for downstream actions
+#   ci_support_dir:   directory containing CI-owned support files
+#   ci_profile:       engine|downstream
 #   ci_build_dir:     cmake cache directory
 #   ci_sdk_dir:       sdk installation directory
 #   ci_build_types:   selected build type mapping as a JSON object
@@ -200,6 +203,7 @@ is-truthy() {
 }
 
 ci_source_dir=$(normalize-path "$ci_source_dir")
+ci_support_dir=$(normalize-path "${ci_support_dir:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}")
 ci_build_dir=$(normalize-path "$ci_build_dir")
 ci_sdk_dir=$(normalize-path "$ci_sdk_dir")
 ci_source_dir=${ci_source_dir%/};   # remove trailing slash if any
@@ -211,6 +215,7 @@ echo "ci_compiler=$ci_compiler"
 echo "ci_lib_type=$ci_lib_type"
 echo "ci_workspace_dir=$ci_workspace_dir"
 echo "ci_source_dir=$ci_source_dir"
+echo "ci_support_dir=$ci_support_dir"
 echo "ci_build_dir=$ci_build_dir"
 echo "ci_sdk_dir=$ci_sdk_dir"
 
@@ -529,7 +534,7 @@ prepare-project-cmake-args() {
             ;;
         ios)
             project_cmake_args+=(-G Xcode)
-            project_cmake_args+=("-DCMAKE_TOOLCHAIN_FILE=${ci_source_dir}/CMake/Toolchains/IOS.cmake")
+            project_cmake_args+=("-DCMAKE_TOOLCHAIN_FILE=${ci_support_dir}/CMake/Toolchains/IOS.cmake")
             project_cmake_args+=('-DDEPLOYMENT_TARGET=12')
             project_cmake_args+=('-DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO')
             case "$ci_arch" in
@@ -1708,7 +1713,21 @@ function action-setup-environment() {
 
     # Define env variables
     ci_short_sha=$(echo ${GITHUB_SHA} | cut -c1-8)
-    ci_hash_thirdparty=$(cmake -DDIRECTORY_PATH="${ci_source_dir}/Source/ThirdParty" -DHASH_FORMAT=short -P "${ci_source_dir}/CMake/Modules/GetThirdPartyHash.cmake" 2>&1)
+    ci_hash_thirdparty=''
+    if [[ "${ci_profile:-engine}" == 'engine' ]]; then
+        local hash_script="${ci_source_dir}/CMake/Modules/GetThirdPartyHash.cmake"
+        if [[ ! -f "$hash_script" ]]; then
+            echo "Error: rbfx ThirdParty hash script does not exist: $hash_script"
+            return 1
+        fi
+        if ! ci_hash_thirdparty=$(cmake \
+            -DDIRECTORY_PATH="${ci_source_dir}/Source/ThirdParty" \
+            -DHASH_FORMAT=short \
+            -P "$hash_script" 2>&1); then
+            echo "$ci_hash_thirdparty"
+            return 1
+        fi
+    fi
     ci_cache_id="${ccache_prefix}-$ci_platform_tag"
     case "$ci_platform" in
         windows|linux|macos)  ci_platform_group='desktop'  ;;
