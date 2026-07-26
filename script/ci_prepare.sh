@@ -36,8 +36,6 @@ setup-environment() {
     fi
 
     local ci_cache_id="${ccache_prefix:-}-${ci_platform_tag}"
-    local ci_platform_group
-    ci_platform_group=$(platform-group)
 
     write-github-env ci_number_of_processors "$ci_number_of_processors"
     write-github-env ci_short_sha "$ci_short_sha"
@@ -188,17 +186,10 @@ resolve-cmake-prefix-path() {
         # Artifact transfer strips executable modes from host tools.
         if [[ "${RUNNER_OS:-}" != 'Windows' ]]; then
             for bin_dir in "$prefix_path/bin" "$prefix_path/Urho3D/bin"; do
-                for executable_dir in \
-                    "$bin_dir" \
-                    "$bin_dir/Debug" \
-                    "$bin_dir/RelWithDebInfo" \
-                    "$bin_dir/Release" \
-                    "$bin_dir/MinSizeRel"; do
-                    if [[ -d "$executable_dir" ]]; then
-                        find "$executable_dir" -maxdepth 1 -type f ! -name '*.*' \
-                            -exec chmod a+x {} +
-                    fi
-                done
+                if [[ -d "$bin_dir" ]]; then
+                    find "$bin_dir" -maxdepth 2 -type f ! -name '*.*' \
+                        -exec chmod a+x {} +
+                fi
             done
         fi
 

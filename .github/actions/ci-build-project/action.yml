@@ -1,16 +1,28 @@
-# Builds and optionally installs one downstream project. Run ci-prepare-platform
-# earlier in the same job: this action consumes the platform, toolchain, cache, and
-# CMake prefix environment prepared by that action. ci-prepare-matrix is optional:
-# callers may provide ci_platform_tag directly to ci-prepare-platform and select the
-# platform-specific configurations built here through build_types.
+# Builds and optionally installs one downstream project. ci-prepare-platform must run
+# earlier in the job; ci-prepare-matrix is optional.
 #
-# The caller owns repository checkout, framework acquisition, and artifact upload.
-# Framework source trees and SDKs are selected entirely through the prepared CMake
-# prefix list; this action has no framework mode or framework-specific path inputs.
-# Non-Android builds use `build_dir` (or the prepared platform-specific default) and
-# run CMake install for every selected `build_types` mapping when `install_dir` is
-# provided. Android builds execute each mapped Gradle task and copy Gradle outputs
-# into the `android` subdirectory of `install_dir`.
+# Steps performed:
+# 1. Resolve `project_dir`, `build_dir`, and `install_dir` against github.workspace.
+#    Validate the project directory. The build directory defaults to
+#    `project-build/<platform tag>`. Android also gets a default install directory;
+#    an empty install directory disables installation on other platforms.
+# 2. Resolve `build_types` as a short-name-to-configuration JSON map. An explicit
+#    action input wins, then matrix.ci_build_types, then the canonical platform
+#    defaults. Normalize and export the map for the build script.
+# 3. For non-Android targets, translate each `cmake_cache_vars` line into a `-D`
+#    argument, configure the project once with the prepared platform/toolchain/CMake
+#    prefixes, and build every mapped configuration sequentially. If installation is
+#    enabled, install every mapped configuration sequentially into `install_dir`.
+# 4. For Android, resolve `android_dir` under the project, execute every mapped Gradle
+#    task sequentially, require the Gradle `build/outputs` directory, and copy its
+#    contents into `<install_dir>/android`.
+# 5. Save the compiler cache after the build unless the job was cancelled or
+#    ci-prepare-platform restored an exact cache hit.
+# 6. Export the resolved build and install directories as action outputs.
+#
+# The caller owns checkout, framework/SDK acquisition, artifact download/upload, and
+# build waiting. Framework source trees and SDKs are selected through the CMake
+# prefixes prepared by ci-prepare-platform.
 name: CI Build Project
 description: Build and optionally install a downstream project using the environment prepared by ci-prepare-platform.
 
@@ -27,7 +39,10 @@ inputs:
     required: false
     default: ''
   build_types:
-    description: "Optional build configurations, one `<platform>:<short-name>:<configuration>` mapping per line. `*` supplies defaults; entries for the active platform replace all defaults. Empty uses the mapping prepared by ci-prepare-platform."
+    description: >-
+      Optional resolved short-name-to-configuration JSON object. Empty uses
+      matrix.ci_build_types when present, otherwise the platform defaults. Every
+      mapped configuration is built sequentially.
     required: false
     default: ''
   cmake_cache_vars:
@@ -56,8 +71,7 @@ runs:
         INPUT_PROJECT_SOURCE_DIR: ${{ inputs.project_dir }}
         INPUT_BUILD_DIR: ${{ inputs.build_dir }}
         INPUT_INSTALL_DIR: ${{ inputs.install_dir }}
-        INPUT_ANDROID_DIR: ${{ inputs.android_dir }}
-        INPUT_BUILD_TYPES: ${{ inputs.build_types }}
+        INPUT_BUILD_TYPES: ${{ inputs.build_types || (matrix.ci_build_types && toJSON(matrix.ci_build_types)) || '' }}
       run: |
         ci_build_script="$GITHUB_ACTION_PATH/../../../script/ci_build.sh"
         ci_data_script="$GITHUB_ACTION_PATH/../../../script/ci_data.py"
@@ -90,10 +104,19 @@ runs:
           project_install_dir="${GITHUB_WORKSPACE}/project-install/${ci_platform_tag}"
         fi
 
+        if [[ -z "${ci_platform:-}" ]]; then
+          echo 'Error: ci-prepare-platform must run before ci-build-project.'
+          exit 1
+        fi
         if [[ -n "$INPUT_BUILD_TYPES" ]]; then
           ci_build_types="$(
             python3 "$ci_data_script" \
-              select-platform-build-types "$ci_platform" "$INPUT_BUILD_TYPES"
+              normalize-build-types "$INPUT_BUILD_TYPES"
+          )"
+        else
+          ci_build_types="$(
+            python3 "$ci_data_script" \
+              default-build-types "$ci_platform"
           )"
         fi
 
@@ -102,9 +125,7 @@ runs:
           printf 'project_source_dir=%s\n' "$project_source_dir"
           printf 'ci_active_project_build_dir=%s\n' "$active_project_build_dir"
           printf 'ci_project_install_dir=%s\n' "$project_install_dir"
-          if [[ -n "$INPUT_BUILD_TYPES" ]]; then
-            printf 'ci_build_types=%s\n' "$ci_build_types"
-          fi
+          printf 'ci_build_types=%s\n' "$ci_build_types"
         } >> "$GITHUB_ENV"
         {
           printf 'build_dir=%s\n' "$active_project_build_dir"

@@ -51,8 +51,7 @@ find-job() {
     job_data=$(
         gh api "/repos/${repository}/actions/runs/${run_id}/attempts/${run_attempt}/jobs?per_page=100" \
             --paginate \
-            --jq '.jobs[] | [.name, .status, (.conclusion // ""), (.started_at // ""), (.completed_at // "")] | @tsv' \
-            2>/dev/null || true
+            --jq '.jobs[] | [.name, .status, (.conclusion // ""), (.started_at // ""), (.completed_at // "")] | @tsv'
     )
     job_row=$(awk -F '\t' -v name="$job_name" '$1 == name { print; exit }' <<< "$job_data")
     if [[ -n "$job_row" ]]; then
@@ -66,19 +65,25 @@ find-artifacts() {
     local artifact_data=''
     local artifact_name=''
     local artifact_id=''
+    local -a matching_artifact_ids=()
     artifact_ids=()
     missing_artifact_names=()
     artifact_data=$(
         gh api "/repos/${repository}/actions/runs/${run_id}/artifacts?per_page=100" \
             --paginate \
-            --jq '.artifacts[] | select(.expired == false) | [.name, (.id | tostring), .created_at] | @tsv' \
-            2>/dev/null || true
+            --jq '.artifacts[] | select(.expired == false) | [.name, (.id | tostring), .created_at] | @tsv'
     )
     for artifact_name in "${artifact_names[@]}"; do
-        artifact_id=$(
+        matching_artifact_ids=()
+        mapfile -t matching_artifact_ids < <(
             awk -F '\t' -v name="$artifact_name" -v started="$job_started_at" \
-                '$1 == name && $3 >= started { print $2; exit }' <<< "$artifact_data"
+                '$1 == name && $3 >= started { print $2 }' <<< "$artifact_data"
         )
+        if [[ ${#matching_artifact_ids[@]} -gt 1 ]]; then
+            echo "Error: multiple run artifacts match '$artifact_name'; artifact names must be unique."
+            return 1
+        fi
+        artifact_id="${matching_artifact_ids[0]:-}"
         if [[ -n "$artifact_id" ]]; then
             artifact_ids+=("$artifact_id")
         else

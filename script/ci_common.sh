@@ -30,31 +30,20 @@ parse-platform-tag() {
         return 1
     fi
 
-    local extra=''
-    IFS='-' read -r ci_platform ci_compiler ci_arch ci_lib_type extra <<< "$ci_platform_tag"
-    if [[ -n "$extra" || -z "$ci_lib_type" ]]; then
-        echo "Error: invalid CI platform tag: $ci_platform_tag"
+    local parsed_platform=''
+    if ! parsed_platform=$(
+        python3 "$ci_common_script_dir/ci_data.py" \
+            platform-tsv "$ci_platform_tag"
+    ); then
         return 1
     fi
-
-    case "$ci_platform_tag" in
-        windows-msvc-x64-dll|windows-msvc-x64-lib|\
-        windows-msvc-x86-dll|windows-msvc-x86-lib|\
-        linux-gcc-x64-dll|linux-gcc-x64-lib|\
-        linux-clang-x64-dll|linux-clang-x64-lib|\
-        macos-clang-arm64-dll|macos-clang-arm64-lib|\
-        macos-clang-x64-dll|macos-clang-x64-lib|\
-        uwp-msvc-x64-dll|uwp-msvc-x64-lib|\
-        android-clang-arm64-dll|android-clang-arm-dll|\
-        android-clang-x64-dll|\
-        ios-clang-arm-lib|ios-clang-arm64-lib|\
-        web-emscripten-wasm-lib)
-            ;;
-        *)
-            echo "Error: unsupported CI platform tag: $ci_platform_tag"
-            return 1
-            ;;
-    esac
+    IFS=$'\t' read -r \
+        ci_platform \
+        ci_compiler \
+        ci_arch \
+        ci_lib_type \
+        ci_platform_group \
+        <<< "$parsed_platform"
 }
 
 detect-processor-count() {
@@ -68,19 +57,6 @@ detect-processor-count() {
         windows|uwp)
             ci_number_of_processors=${NUMBER_OF_PROCESSORS:-1}
             ;;
-        *)
-            echo "Error: unsupported CI platform: $ci_platform"
-            return 1
-            ;;
-    esac
-}
-
-platform-group() {
-    case "$ci_platform" in
-        windows|linux|macos) printf 'desktop\n' ;;
-        android|ios) printf 'mobile\n' ;;
-        uwp) printf 'uwp\n' ;;
-        web) printf 'web\n' ;;
         *)
             echo "Error: unsupported CI platform: $ci_platform"
             return 1

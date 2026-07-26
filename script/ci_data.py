@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Structured-data operations used by the rbfx CI shell entry points."""
+"""Canonical structured data and platform rules for rbfx CI."""
 
 from __future__ import annotations
 
@@ -9,15 +9,38 @@ import json
 import sys
 
 
+PLATFORM_TAGS = (
+    'windows-msvc-x64-dll',
+    'windows-msvc-x64-lib',
+    'windows-msvc-x86-dll',
+    'windows-msvc-x86-lib',
+    'linux-gcc-x64-dll',
+    'linux-gcc-x64-lib',
+    'linux-clang-x64-dll',
+    'linux-clang-x64-lib',
+    'macos-clang-arm64-dll',
+    'macos-clang-arm64-lib',
+    'macos-clang-x64-dll',
+    'macos-clang-x64-lib',
+    'uwp-msvc-x64-dll',
+    'uwp-msvc-x64-lib',
+    'android-clang-arm64-dll',
+    'android-clang-arm-dll',
+    'android-clang-x64-dll',
+    'ios-clang-arm-lib',
+    'ios-clang-arm64-lib',
+    'web-emscripten-wasm-lib',
+)
 SUPPORTED_PLATFORMS = {
-    'windows',
-    'linux',
-    'macos',
-    'uwp',
-    'android',
-    'ios',
-    'web',
+    tag.split('-', maxsplit=1)[0]
+    for tag in PLATFORM_TAGS
 }
+DEFAULT_BUILD_TYPE_RULES = """\
+*:dbg:Debug
+*:rel:RelWithDebInfo
+android:dbg:assembleDebug
+android:rel:assembleRelease
+"""
 
 
 def write_output(value: str) -> None:
@@ -30,6 +53,43 @@ def write_output(value: str) -> None:
         binary_stream.write(output.encode('utf-8'))
 
 
+def parse_platform_tag(platform_tag: str) -> tuple[str, str, str, str]:
+    if platform_tag not in PLATFORM_TAGS:
+        raise ValueError(f'unsupported CI platform tag: {platform_tag}')
+    platform, compiler, arch, lib_type = platform_tag.split('-')
+    return platform, compiler, arch, lib_type
+
+
+def platform_group(platform: str) -> str:
+    if platform in {'windows', 'linux', 'macos'}:
+        return 'desktop'
+    if platform in {'android', 'ios'}:
+        return 'mobile'
+    if platform in {'uwp', 'web'}:
+        return platform
+    raise ValueError(f'unsupported platform: {platform}')
+
+
+def resolve_runs_on(platform_tag: str) -> str:
+    platform, _compiler, _arch, _lib_type = parse_platform_tag(platform_tag)
+    if platform in {'windows', 'uwp'}:
+        return 'windows-latest'
+    if platform in {'macos', 'ios'}:
+        return 'macos-latest'
+    return 'ubuntu-latest'
+
+
+def resolve_host_platform_tag(platform_tag: str) -> str:
+    platform, _compiler, _arch, lib_type = parse_platform_tag(platform_tag)
+    if platform in {'android', 'web'}:
+        return f'linux-gcc-x64-{lib_type}'
+    if platform == 'ios':
+        return f'macos-clang-x64-{lib_type}'
+    if platform == 'uwp':
+        return f'windows-msvc-x64-{lib_type}'
+    return platform_tag
+
+
 def parse_json_mapping(raw_value: str) -> dict[str, str]:
     try:
         value = json.loads(raw_value)
@@ -40,6 +100,7 @@ def parse_json_mapping(raw_value: str) -> dict[str, str]:
     if any(
         not isinstance(short_name, str)
         or not short_name
+        or '@' in short_name
         or not isinstance(configuration, str)
         or not configuration
         or any(
@@ -49,9 +110,69 @@ def parse_json_mapping(raw_value: str) -> dict[str, str]:
         for short_name, configuration in value.items()
     ):
         raise ValueError(
-            'keys and values must be non-empty strings without control whitespace'
+            'keys and values must be non-empty strings without control whitespace; '
+            'keys may not contain @'
         )
     return value
+
+
+def parse_build_type_rules(raw_value: str) -> dict[str, dict[str, str]]:
+    rules: dict[str, dict[str, str]] = {}
+    for line_number, raw_line in enumerate(raw_value.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = [part.strip() for part in line.split(':', maxsplit=2)]
+        if len(parts) != 3 or any(not part for part in parts):
+            raise ValueError(
+                f'invalid build_types entry on line {line_number}: {raw_line!r}; '
+                'expected <platform>:<short-name>:<configuration>'
+            )
+        selector, short_name, configuration = parts
+        if selector != '*' and selector not in SUPPORTED_PLATFORMS:
+            raise ValueError(
+                f'unsupported platform on line {line_number}: {selector}'
+            )
+        if '@' in short_name or any(
+            character in short_name + configuration
+            for character in '\r\n\t'
+        ):
+            raise ValueError(
+                f'invalid build_types entry on line {line_number}: '
+                'short names may not contain @ or control whitespace'
+            )
+        mappings = rules.setdefault(selector, {})
+        if short_name in mappings:
+            raise ValueError(
+                f'duplicate mapping on line {line_number}: '
+                f'{selector}:{short_name}'
+            )
+        mappings[short_name] = configuration
+
+    if not rules:
+        raise ValueError('build_types must contain at least one mapping')
+    return rules
+
+
+def resolve_build_types(
+    platform: str,
+    rules: dict[str, dict[str, str]],
+) -> dict[str, str]:
+    if platform not in SUPPORTED_PLATFORMS:
+        raise ValueError(f'unsupported platform: {platform}')
+    mappings = rules.get(platform, rules.get('*', {}))
+    if not mappings:
+        raise ValueError(
+            f'no build configurations are defined for platform {platform!r}'
+        )
+    return dict(mappings)
+
+
+def default_build_types(platform: str) -> dict[str, str]:
+    return resolve_build_types(
+        platform,
+        parse_build_type_rules(DEFAULT_BUILD_TYPE_RULES),
+    )
 
 
 def build_types_tsv(raw_value: str) -> None:
@@ -68,45 +189,22 @@ def normalize_build_types(raw_value: str) -> None:
     ))
 
 
-def select_platform_build_types(platform: str, raw_value: str) -> None:
-    if platform not in SUPPORTED_PLATFORMS:
-        raise ValueError(f'unsupported platform: {platform}')
+def write_default_build_types(platform: str) -> None:
+    write_output(json.dumps(
+        default_build_types(platform),
+        separators=(',', ':'),
+    ))
 
-    default_mappings: dict[str, str] = {}
-    platform_mappings: dict[str, dict[str, str]] = {}
-    for line_number, raw_line in enumerate(raw_value.splitlines(), start=1):
-        line = raw_line.strip()
-        if not line:
-            continue
-        parts = [part.strip() for part in line.split(':', maxsplit=2)]
-        if len(parts) != 3 or any(not part for part in parts):
-            raise ValueError(
-                f'invalid entry on line {line_number}: {raw_line!r}; '
-                'expected <platform>:<short-name>:<configuration>'
-            )
-        selector, short_name, configuration = parts
-        if selector != '*' and selector not in SUPPORTED_PLATFORMS:
-            raise ValueError(
-                f'unsupported platform on line {line_number}: {selector}'
-            )
-        mappings = (
-            default_mappings
-            if selector == '*'
-            else platform_mappings.setdefault(selector, {})
-        )
-        if short_name in mappings:
-            raise ValueError(
-                f'duplicate mapping on line {line_number}: '
-                f'{selector}:{short_name}'
-            )
-        mappings[short_name] = configuration
 
-    mappings = platform_mappings.get(platform, default_mappings)
-    if not mappings:
-        raise ValueError(
-            f'no build configurations are defined for platform {platform!r}'
-        )
-    write_output(json.dumps(mappings, separators=(',', ':')))
+def write_platform_tsv(platform_tag: str) -> None:
+    platform, compiler, arch, lib_type = parse_platform_tag(platform_tag)
+    write_output('\t'.join((
+        platform,
+        compiler,
+        arch,
+        lib_type,
+        platform_group(platform),
+    )))
 
 
 def parse_list(kind: str, raw_value: str) -> None:
@@ -159,8 +257,10 @@ def main(arguments: list[str]) -> None:
         build_types_tsv(values[0])
     elif command == 'normalize-build-types' and len(values) == 1:
         normalize_build_types(values[0])
-    elif command == 'select-platform-build-types' and len(values) == 2:
-        select_platform_build_types(values[0], values[1])
+    elif command == 'default-build-types' and len(values) == 1:
+        write_default_build_types(values[0])
+    elif command == 'platform-tsv' and len(values) == 1:
+        write_platform_tsv(values[0])
     elif command == 'parse-list' and len(values) == 2:
         if values[0] not in {'paths', 'strings'}:
             raise ValueError('parse-list kind must be paths or strings')

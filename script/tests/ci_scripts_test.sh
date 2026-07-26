@@ -17,6 +17,10 @@ assert-contains() {
     grep -F -- "$pattern" "$file" >/dev/null || fail "$file does not contain: $pattern"
 }
 
+reset-command-log() {
+    : > "$MOCK_COMMAND_LOG"
+}
+
 mock_bin="$temp_dir/bin"
 mkdir -p "$mock_bin"
 for command_name in cmake ccache ctest dotnet gradle gh butler; do
@@ -27,6 +31,7 @@ export MOCK_COMMAND_LOG="$temp_dir/commands.log"
 : > "$MOCK_COMMAND_LOG"
 
 test-setup-environment() {
+    reset-command-log
     local github_env="$temp_dir/setup.env"
     ci_platform_tag=linux-gcc-x64-dll \
     ci_profile=downstream \
@@ -46,6 +51,7 @@ test-setup-environment() {
 }
 
 test-generate-engine() {
+    reset-command-log
     local workspace="$temp_dir/generate"
     mkdir -p "$workspace/source" "$workspace/build" "$workspace/sdk"
     local github_output="$workspace/output"
@@ -72,6 +78,7 @@ test-generate-engine() {
 }
 
 test-downstream-linux-build() {
+    reset-command-log
     local workspace="$temp_dir/linux-project"
     mkdir -p "$workspace/source" "$workspace/build" "$workspace/install" "$workspace/sdk"
     ci_platform=linux \
@@ -98,6 +105,7 @@ test-downstream-linux-build() {
 }
 
 test-downstream-android-custom-task() {
+    reset-command-log
     local workspace="$temp_dir/android-project"
     mkdir -p "$workspace/source/android" "$workspace/build" "$workspace/sdk"
     ci_platform=android \
@@ -117,6 +125,7 @@ test-downstream-android-custom-task() {
 }
 
 test-engine-sdk-install() {
+    reset-command-log
     local workspace="$temp_dir/install"
     mkdir -p "$workspace/source" "$workspace/build" "$workspace/sdk"
     ci_platform=linux \
@@ -139,7 +148,33 @@ test-engine-sdk-install() {
         || fail 'ThirdParty file manifest was not created'
 }
 
+test-custom-android-engine-sdk-install() {
+    reset-command-log
+    local workspace="$temp_dir/android-install"
+    mkdir -p \
+        "$workspace/source/android/.cxx/Benchmark/hash/arm64-v8a" \
+        "$workspace/build" \
+        "$workspace/sdk"
+
+    ci_platform=android \
+    ci_arch=arm64 \
+    ci_compiler=clang \
+    ci_lib_type=dll \
+    ci_platform_tag=android-clang-arm64-dll \
+    ci_workspace_dir="$workspace" \
+    ci_source_dir="$workspace/source" \
+    ci_build_dir="$workspace/build" \
+    ci_sdk_dir="$workspace/sdk" \
+    ci_hash_thirdparty=expected-thirdparty \
+    ci_build_types='{"benchmark":"bundleBenchmark"}' \
+        "$repo_root/script/ci_build.sh" install-engine-sdk
+
+    assert-contains "$MOCK_COMMAND_LOG" '--config Benchmark'
+    assert-contains "$MOCK_COMMAND_LOG" '--component ThirdParty'
+}
+
 test-platform-cmake-arguments() {
+    reset-command-log
     local workspace="$temp_dir/platform-arguments"
     mkdir -p "$workspace/source" "$workspace/build" "$workspace/sdk" "$workspace/toolchains"
     touch "$workspace/toolchains/IOS.cmake"
@@ -193,6 +228,7 @@ test-platform-cmake-arguments() {
 }
 
 test-prefix-resolution() {
+    reset-command-log
     local workspace="$temp_dir/prefixes"
     local host="$workspace/host"
     local source="$workspace/source"
@@ -223,6 +259,7 @@ test-prefix-resolution() {
 }
 
 test-cache-id-mismatch() {
+    reset-command-log
     local workspace="$temp_dir/cache"
     local asset_name='rebelfork-sdk-linux-gcc-x64-dll-latest'
     mkdir -p "$workspace/archive/$asset_name"
@@ -246,6 +283,7 @@ test-cache-id-mismatch() {
 }
 
 test-wait-for-build() {
+    reset-command-log
     local workspace="$temp_dir/wait"
     mkdir -p "$workspace"
     printf 'native-job\tcompleted\tsuccess\t2026-01-01T00:00:00Z\t2026-01-01T00:01:00Z\n' > "$workspace/jobs"
@@ -276,9 +314,35 @@ test-wait-for-build() {
         "$repo_root/script/ci_wait_for_build.sh" >/dev/null 2>&1; then
         fail 'failed producer job was accepted'
     fi
+
+    printf 'native-job\tcompleted\tsuccess\t2026-01-01T00:00:00Z\t2026-01-01T00:01:00Z\n' > "$workspace/jobs"
+    printf 'native-artifact\t42\t2026-01-01T00:00:30Z\nnative-artifact\t43\t2026-01-01T00:00:40Z\n' > "$workspace/artifacts"
+    if MOCK_GH_JOBS_FILE="$workspace/jobs" \
+        MOCK_GH_ARTIFACTS_FILE="$workspace/artifacts" \
+        INPUT_JOB_NAME=native-job \
+        INPUT_ARTIFACT_NAMES=native-artifact \
+        INPUT_TIMEOUT_SECONDS=2 \
+        INPUT_REPOSITORY=rbfx/sample-project \
+        INPUT_RUN_ID=1 \
+        CI_WAIT_POLL_SECONDS=0 \
+        "$repo_root/script/ci_wait_for_build.sh" >/dev/null 2>&1; then
+        fail 'ambiguous run artifacts were accepted'
+    fi
+
+    if MOCK_GH_JOBS_FILE="$workspace/missing-jobs" \
+        MOCK_GH_ARTIFACTS_FILE="$workspace/artifacts" \
+        INPUT_JOB_NAME=native-job \
+        INPUT_TIMEOUT_SECONDS=2 \
+        INPUT_REPOSITORY=rbfx/sample-project \
+        INPUT_RUN_ID=1 \
+        CI_WAIT_POLL_SECONDS=0 \
+        "$repo_root/script/ci_wait_for_build.sh" >/dev/null 2>&1; then
+        fail 'GitHub API failure was ignored'
+    fi
 }
 
 test-real-linux-project() {
+    reset-command-log
     local workspace="$temp_dir/real-linux-project"
     local integration_bin="$workspace/bin"
     mkdir -p "$integration_bin" "$workspace/sdk"
@@ -305,16 +369,49 @@ test-real-linux-project() {
         || fail 'real downstream build did not install its executable'
 }
 
+test-default-build-types-run-sequentially() {
+    reset-command-log
+    local workspace="$temp_dir/default-build-types"
+    mkdir -p "$workspace/source" "$workspace/build" "$workspace/sdk"
+
+    ci_platform=linux \
+    ci_arch=x64 \
+    ci_compiler=gcc \
+    ci_lib_type=lib \
+    ci_platform_tag=linux-gcc-x64-lib \
+    ci_number_of_processors=2 \
+    ci_workspace_dir="$workspace" \
+    ci_source_dir="$workspace/source" \
+    ci_build_dir="$workspace/build" \
+    ci_sdk_dir="$workspace/sdk" \
+        "$repo_root/script/ci_build.sh" build-project \
+            --build-dir "$workspace/build" \
+            "$workspace/source"
+
+    mapfile -t build_commands < <(
+        grep -F 'cmake --build' "$MOCK_COMMAND_LOG"
+    )
+    [[ ${#build_commands[@]} -eq 2 ]] \
+        || fail 'default build types did not produce exactly two builds'
+    [[ "${build_commands[0]}" == *'--config Debug'* ]] \
+        || fail 'Debug was not built first'
+    [[ "${build_commands[1]}" == *'--config RelWithDebInfo'* ]] \
+        || fail 'RelWithDebInfo was not built second'
+}
+
 test-caller-audit() {
     local removed_pattern='generate-detect-thirdparty|build-configurations|test-configurations|cstest-configurations|extract-sdk-archive|download-release| action-apk| apk'
-    if rg -n "$removed_pattern" \
-        "$repo_root/.github" \
-        "$repo_root/script/ci_build.sh" \
-        "$repo_root/script/ci_prepare.sh" \
-        "$repo_root/script/ci_artifacts.sh" \
-        "$repo_root/script/ci_wait_for_build.sh" \
-        "$repo_root/../rbfx/.github/workflows" \
-        ; then
+    local -a audit_paths=(
+        "$repo_root/.github"
+        "$repo_root/script/ci_build.sh"
+        "$repo_root/script/ci_prepare.sh"
+        "$repo_root/script/ci_artifacts.sh"
+        "$repo_root/script/ci_wait_for_build.sh"
+    )
+    if [[ -d "$repo_root/../rbfx/.github/workflows" ]]; then
+        audit_paths+=("$repo_root/../rbfx/.github/workflows")
+    fi
+    if rg -n "$removed_pattern" "${audit_paths[@]}"; then
         fail 'removed CI command is still referenced'
     fi
 }
@@ -324,10 +421,12 @@ test-generate-engine
 test-downstream-linux-build
 test-downstream-android-custom-task
 test-engine-sdk-install
+test-custom-android-engine-sdk-install
 test-platform-cmake-arguments
 test-prefix-resolution
 test-cache-id-mismatch
 test-wait-for-build
 test-real-linux-project
+test-default-build-types-run-sequentially
 test-caller-audit
 echo 'All CI script tests passed.'

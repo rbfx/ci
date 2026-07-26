@@ -32,29 +32,70 @@ def yaml_section_keys(path: pathlib.Path, section: str) -> set[str]:
 
 class MatrixContractTest(unittest.TestCase):
     def test_standard_matrix_has_twenty_grouped_targets(self) -> None:
-        build_types = matrix.parse_build_types(matrix.DEFAULT_BUILD_TYPES)
-        entries = matrix.resolve_matrix_selection('platforms', ['all'], build_types)
-        grouped = matrix.build_platform_matrix(entries, ['all'])['include']
+        rules = ci_data.parse_build_type_rules(
+            ci_data.DEFAULT_BUILD_TYPE_RULES
+        )
+        entries = matrix.resolve_selection(['all'], rules)
+        grouped = matrix.build_matrix(entries, False)['include']
 
         self.assertEqual(20, len(grouped))
-        self.assertEqual(matrix.ALL_PLATFORM_TAGS, [
+        self.assertEqual(list(ci_data.PLATFORM_TAGS), [
             row['ci_platform_tag'] for row in grouped
         ])
         self.assertTrue(all(len(row['ci_build_types']) == 2 for row in grouped))
+        self.assertTrue(all(row['ci_build_type'] == '' for row in grouped))
+
+    def test_separate_build_types_have_same_resolved_map_contract(self) -> None:
+        rules = ci_data.parse_build_type_rules(
+            ci_data.DEFAULT_BUILD_TYPE_RULES
+        )
+        entries = matrix.resolve_selection(['all'], rules)
+        separate = matrix.build_matrix(entries, True)['include']
+
+        self.assertEqual(40, len(separate))
+        self.assertEqual(40, len({
+            row['ci_job_name']
+            for row in separate
+        }))
+        self.assertTrue(all(len(row['ci_build_types']) == 1 for row in separate))
+        self.assertTrue(all(
+            row['ci_build_type'] in row['ci_build_types']
+            for row in separate
+        ))
 
     def test_android_custom_mapping_remains_supported(self) -> None:
-        build_types = matrix.parse_build_types(
-            '*:dbg:Debug\nandroid:benchmark:bundleBenchmark\n'
+        rules = ci_data.parse_build_type_rules(
+            '*:dbg:Debug\nandroid:benchmark::app:bundleBenchmark\n'
         )
-        entries = matrix.resolve_matrix_selection(
-            'platforms',
+        entries = matrix.resolve_selection(
             ['android-clang-arm64-dll'],
-            build_types,
+            rules,
         )
         self.assertEqual(
-            [('android-clang-arm64-dll', 'benchmark', 'bundleBenchmark')],
+            [
+                (
+                    'android-clang-arm64-dll',
+                    'benchmark',
+                    ':app:bundleBenchmark',
+                )
+            ],
             entries,
         )
+
+    def test_exact_platform_tag_wins_over_build_type_name(self) -> None:
+        rules = ci_data.parse_build_type_rules('*:lib:Debug')
+        self.assertEqual(
+            [('linux-gcc-x64-lib', 'lib', 'Debug')],
+            matrix.resolve_selection(['linux-gcc-x64-lib'], rules),
+        )
+
+    def test_build_type_selector_uses_explicit_separator(self) -> None:
+        rules = ci_data.parse_build_type_rules(
+            ci_data.DEFAULT_BUILD_TYPE_RULES
+        )
+        entries = matrix.resolve_selection(['linux@dbg'], rules)
+        self.assertEqual(4, len(entries))
+        self.assertTrue(all(entry[1] == 'dbg' for entry in entries))
 
 
 class StructuredDataTest(unittest.TestCase):
@@ -92,12 +133,33 @@ class StructuredDataTest(unittest.TestCase):
 
     def test_platform_mapping_prefers_platform_entries(self) -> None:
         self.assertEqual(
-            '{"benchmark":"bundleBenchmark"}\n',
-            self.capture(
-                ci_data.select_platform_build_types,
+            {'benchmark': 'bundleBenchmark'},
+            ci_data.resolve_build_types(
                 'android',
-                '*:dbg:Debug\nandroid:benchmark:bundleBenchmark\n',
+                ci_data.parse_build_type_rules(
+                    '*:dbg:Debug\nandroid:benchmark:bundleBenchmark\n'
+                ),
             ),
+        )
+
+    def test_default_build_types_are_canonical(self) -> None:
+        self.assertEqual(
+            {'dbg': 'Debug', 'rel': 'RelWithDebInfo'},
+            ci_data.default_build_types('linux'),
+        )
+        self.assertEqual(
+            {'dbg': 'assembleDebug', 'rel': 'assembleRelease'},
+            ci_data.default_build_types('android'),
+        )
+
+    def test_platform_metadata_comes_from_canonical_tags(self) -> None:
+        self.assertEqual(
+            ('ios', 'clang', 'arm64', 'lib'),
+            ci_data.parse_platform_tag('ios-clang-arm64-lib'),
+        )
+        self.assertEqual(
+            'macos-clang-x64-lib',
+            ci_data.resolve_host_platform_tag('ios-clang-arm64-lib'),
         )
 
     def test_path_lists_reject_semicolons(self) -> None:
@@ -121,13 +183,8 @@ class CompositeActionContractTest(unittest.TestCase):
     def test_prepare_matrix_contract(self) -> None:
         self.assert_contract(
             'ci-prepare-matrix',
-            {'profile', 'platforms', 'build_types'},
-            {
-                'requested_platform_tags',
-                'platform_tags',
-                'platform_matrix',
-                'build_matrix',
-            },
+            {'platforms', 'build_types', 'separate_build_types'},
+            {'matrix'},
         )
 
     def test_prepare_platform_contract(self) -> None:
@@ -136,8 +193,6 @@ class CompositeActionContractTest(unittest.TestCase):
             {
                 'profile',
                 'ci_platform_tag',
-                'build_types',
-                'project_dir',
                 'cmake_prefix_path',
             },
             {'build_cache_hit', 'engine_thirdparty_used', 'cmake_prefix_path'},
@@ -156,6 +211,15 @@ class CompositeActionContractTest(unittest.TestCase):
             },
             {'build_dir', 'install_dir'},
         )
+        action = (
+            self.ACTIONS / 'ci-build-project' / 'action.yml'
+        ).read_text(encoding='utf-8')
+        self.assertIn(
+            'inputs.build_types || '
+            '(matrix.ci_build_types && toJSON(matrix.ci_build_types))',
+            action,
+        )
+        self.assertIn('default-build-types "$ci_platform"', action)
 
     def test_wait_for_build_contract(self) -> None:
         self.assert_contract(

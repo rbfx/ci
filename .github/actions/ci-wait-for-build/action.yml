@@ -1,7 +1,23 @@
-# Explicitly waits for another job in the current workflow run. This action is kept
-# separate from platform preparation so callers decide when a cross build needs to
-# wait, which producer job it needs, and which artifacts must be visible before
-# continuing. Artifact download remains a separate caller-owned step.
+# Waits for a named job in the current workflow run. This supports cross-builds
+# because GitHub cannot express dependencies between individual rows of one matrix.
+#
+# Steps performed:
+# 1. Validate the job name, repository/run identity, timeout values, and the optional
+#    newline or JSON list of artifact names.
+# 2. Poll the current workflow run attempt's jobs endpoint until an exact rendered job
+#    name appears and completes, or until the overall timeout expires. GitHub API
+#    errors fail immediately.
+# 3. Fail immediately if the producer job completes with any conclusion other than
+#    success. If no artifacts were requested, write its conclusion and completion
+#    timestamp and finish.
+# 4. Query unexpired, run-level artifacts and match each requested unique name created
+#    after the producer job started. Reject duplicate matching names. After the job
+#    completes, keep polling missing artifacts only for `artifact_grace_seconds`.
+# 5. Write the successful conclusion, completion timestamp, and comma-separated
+#    artifact IDs in requested-name order. Artifact download remains caller-owned.
+#
+# GitHub artifacts are associated with a run rather than a job, so requested artifact
+# names must be unique within the workflow run.
 name: CI Wait for Build
 description: Wait for a named workflow job and, optionally, its artifacts.
 
@@ -10,7 +26,7 @@ inputs:
     description: Exact rendered workflow job name to wait for.
     required: true
   artifact_names:
-    description: Optional artifact names to wait for after the job succeeds, one per line or as a JSON string array.
+    description: Optional run-unique artifact names to wait for after the job succeeds, one per line or as a JSON string array.
     required: false
     default: '[]'
   timeout_seconds:

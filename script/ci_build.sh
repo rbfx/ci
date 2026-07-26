@@ -63,22 +63,20 @@ parse-args "$@"
 
 declare -a configured_build_type_ids=()
 declare -A configured_build_type_names=()
-declare -A android_engine_cmake_types=(
-    [dbg]=Debug
-    [rel]=RelWithDebInfo
-)
-
 load-build-types() {
-    local default_build_types='{"dbg":"Debug","rel":"RelWithDebInfo"}'
-    if [[ "$ci_platform" == 'android' ]]; then
-        default_build_types='{"dbg":"assembleDebug","rel":"assembleRelease"}'
+    local build_types="${ci_build_types:-}"
+    if [[ -z "$build_types" ]]; then
+        build_types=$(
+            python3 "$script_dir/ci_data.py" \
+                default-build-types "$ci_platform"
+        )
     fi
 
     local parsed_build_types=''
     if ! parsed_build_types=$(
         python3 "$script_dir/ci_data.py" \
             build-types-tsv \
-            "${ci_build_types:-$default_build_types}"
+            "$build_types"
     ); then
         return 1
     fi
@@ -242,53 +240,84 @@ install-build-artifacts() {
     local build_type=$1
     shift
     local configuration="${configured_build_type_names[$build_type]}"
-    if [[ "$ci_platform" == 'android' ]]; then
-        configuration="${android_engine_cmake_types[$build_type]:-}"
-        if [[ -z "$configuration" ]]; then
-            echo "Error: Android engine SDK install has no CMake mapping for '$build_type'"
-            return 1
-        fi
-        local android_abi="$ci_arch"
-        case "$ci_arch" in
-            arm) android_abi=armeabi-v7a ;;
-            arm64) android_abi=arm64-v8a ;;
-            x64) android_abi=x86_64 ;;
-        esac
-        local -a install_dirs=()
-        shopt -s nullglob
-        install_dirs=("$ci_source_dir/android/.cxx/$configuration"/*/"$android_abi")
-        shopt -u nullglob
-        if [[ ${#install_dirs[@]} -ne 1 ]]; then
-            echo "Error: expected one Android install directory for $configuration, found ${#install_dirs[@]}"
-            return 1
-        fi
-        cmake --install "${install_dirs[0]}" --config "$configuration" "$@"
-    else
-        cmake --install "$ci_build_dir" --config "$configuration" "$@"
-    fi
+    cmake --install "$ci_build_dir" --config "$configuration" "$@"
 
     if [[ "$ci_platform" == 'windows' ]]; then
         copy-runtime-libraries-for-executables "$ci_sdk_dir/bin"
     fi
 }
 
+install-android-build-artifacts() {
+    local android_abi="$ci_arch"
+    case "$ci_arch" in
+        arm) android_abi=armeabi-v7a ;;
+        arm64) android_abi=arm64-v8a ;;
+        x64) android_abi=x86_64 ;;
+    esac
+
+    local cxx_root="$ci_source_dir/android/.cxx"
+    local -a install_dirs=()
+    if [[ -d "$cxx_root" ]]; then
+        mapfile -t install_dirs < <(
+            find "$cxx_root" \
+                -mindepth 3 \
+                -maxdepth 3 \
+                -type d \
+                -name "$android_abi" \
+                | sort
+        )
+    fi
+    if [[ ${#install_dirs[@]} -eq 0 ]]; then
+        echo "Error: no Android install directories found for $android_abi"
+        return 1
+    fi
+
+    local install_dir=''
+    for install_dir in "${install_dirs[@]}"; do
+        local relative_dir="${install_dir#"$cxx_root/"}"
+        local configuration="${relative_dir%%/*}"
+        cmake --install "$install_dir" --config "$configuration" "$@"
+    done
+}
+
 install-engine-sdk() {
     local install_prefix="$ci_sdk_dir"
     local build_type=''
-    for build_type in "${configured_build_type_ids[@]}"; do
-        install-build-artifacts "$build_type" --component ThirdParty --prefix "$install_prefix"
-    done
+    if [[ "$ci_platform" == 'android' ]]; then
+        install-android-build-artifacts \
+            --component ThirdParty \
+            --prefix "$install_prefix"
+    else
+        for build_type in "${configured_build_type_ids[@]}"; do
+            install-build-artifacts "$build_type" \
+                --component ThirdParty \
+                --prefix "$install_prefix"
+        done
+    fi
     printf '%s\n' "${ci_hash_thirdparty:-}" > "$install_prefix/thirdparty-id.txt"
     (
         cd "$install_prefix"
         find . -type f | sed 's|^\./||' > thirdparty-files.txt
     )
-    for build_type in "${configured_build_type_ids[@]}"; do
-        install-build-artifacts "$build_type" --prefix "$install_prefix"
-    done
+    if [[ "$ci_platform" == 'android' ]]; then
+        install-android-build-artifacts --prefix "$install_prefix"
+    else
+        for build_type in "${configured_build_type_ids[@]}"; do
+            install-build-artifacts "$build_type" --prefix "$install_prefix"
+        done
+    fi
 
-    if [[ "$ci_platform" == 'web' && -n "${configured_build_type_names[rel]:-}" ]]; then
-        local configuration="${configured_build_type_names[rel]}"
+    if [[ "$ci_platform" == 'web' ]]; then
+        local configuration=''
+        for build_type in "${configured_build_type_ids[@]}"; do
+            local candidate="${configured_build_type_names[$build_type]}"
+            if [[ -f "$ci_sdk_dir/bin/$candidate/Samples.html" ]]; then
+                configuration="$candidate"
+            fi
+        done
+        if [[ -z "$configuration" ]]; then
+            return
+        fi
         mkdir -p "$ci_sdk_dir/deploy"
         cp -r \
             "$ci_sdk_dir/bin/$configuration/SampleResources.js" \
