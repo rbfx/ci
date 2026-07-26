@@ -60,6 +60,7 @@ runs:
         INPUT_BUILD_TYPES: ${{ inputs.build_types }}
       run: |
         ci_build_script="$GITHUB_ACTION_PATH/../../../script/ci_build.sh"
+        ci_data_script="$GITHUB_ACTION_PATH/../../../script/ci_data.py"
 
         resolve_workspace_path() {
           local path="$1"
@@ -79,7 +80,7 @@ runs:
         if [[ -n "$INPUT_BUILD_DIR" ]]; then
           active_project_build_dir="$(resolve_workspace_path "$INPUT_BUILD_DIR")"
         else
-          active_project_build_dir="${project_build_dir:-${GITHUB_WORKSPACE}/project-build/${ci_platform_tag}}"
+          active_project_build_dir="${GITHUB_WORKSPACE}/project-build/${ci_platform_tag}"
         fi
 
         project_install_dir=''
@@ -90,50 +91,10 @@ runs:
         fi
 
         if [[ -n "$INPUT_BUILD_TYPES" ]]; then
-          ci_build_types="$(python3 -c '
-        import json
-        import sys
-
-        supported_platforms = {
-            "windows", "linux", "macos", "uwp", "android", "ios", "web"
-        }
-        default_mappings = {}
-        platform_mappings = {}
-        for line_number, raw_line in enumerate(sys.argv[1].splitlines(), start=1):
-            line = raw_line.strip()
-            if not line:
-                continue
-            parts = [part.strip() for part in line.split(":", maxsplit=2)]
-            if len(parts) != 3 or any(not part for part in parts):
-                raise SystemExit(
-                    f"Invalid build_types entry on line {line_number}: {raw_line!r}. "
-                    "Expected <platform>:<short-name>:<configuration>."
-                )
-            platform, short_name, configuration = parts
-            if platform != "*" and platform not in supported_platforms:
-                raise SystemExit(
-                    f"Unsupported build_types platform on line {line_number}: "
-                    f"{platform}"
-                )
-            mappings = (
-                default_mappings if platform == "*" else
-                platform_mappings.setdefault(platform, {})
-            )
-            if short_name in mappings:
-                raise SystemExit(
-                    f"Duplicate build_types mapping on line {line_number}: "
-                    f"{platform}:{short_name}"
-                )
-            mappings[short_name] = configuration
-        active_platform = sys.argv[2]
-        mappings = platform_mappings.get(active_platform, default_mappings)
-        if not mappings:
-            raise SystemExit(
-                f"build_types does not define configurations for platform "
-                f"{active_platform!r}; provide `{active_platform}` or `*` entries"
-            )
-        sys.stdout.write(json.dumps(mappings, separators=(",", ":")))
-        ' "$INPUT_BUILD_TYPES" "$ci_platform")"
+          ci_build_types="$(
+            python3 "$ci_data_script" \
+              select-platform-build-types "$ci_platform" "$INPUT_BUILD_TYPES"
+          )"
         fi
 
         {

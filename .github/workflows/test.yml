@@ -1,0 +1,23 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  Scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check shell syntax
+        run: bash -n script/*.sh script/tests/*.sh
+
+      - name: Test script behavior
+        run: script/tests/ci_scripts_test.sh
+
+      - name: Test matrix and action contracts
+        run: python3 -m unittest script/tests/ci_contract_test.py

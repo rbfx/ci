@@ -7,7 +7,7 @@
 #    environment. ci-prepare-matrix is optional. Resolve the grouped `ci_build_types`
 #    mapping the same way, then derive the platform, configurations, architecture,
 #    compiler, linkage, cache identity, build directories, and other shared CI
-#    variables by using `ci_build.sh` from this action's own repository checkout.
+#    variables by using the preparation helper from this action's own checkout.
 #    This keeps action logic pinned to the same repository and ref as the action.
 #    Defaults such as CMake/.NET versions and ccache behavior are exported through
 #    `GITHUB_ENV`.
@@ -23,7 +23,7 @@
 # 3. Initialize the selected compiler/toolchain environment. Web jobs shallow-clone
 #    and activate emsdk; Android jobs set up Gradle; DLL and Android jobs set up
 #    .NET; non-Android jobs install the requested CMake version. Platform-specific
-#    dependencies are then installed by `ci_build.sh dependencies`.
+#    dependencies are then installed by the platform preparation helper.
 # 4. Restore the engine or downstream compiler cache with keys scoped to platform,
 #    source revision, and (for downstream jobs) repository. The downstream cache-hit
 #    state is exported so ci-build-project knows whether a new cache must be saved.
@@ -94,45 +94,26 @@ runs:
           else
             ci_build_types_value='{"dbg":"Debug","rel":"RelWithDebInfo"}'
           fi
-        else
-          ci_build_types_value="$(python3 -c '
-        import json
-        import sys
-        value = json.loads(sys.argv[1])
-        if not isinstance(value, dict) or not value:
-            raise SystemExit("build_types must be a non-empty JSON object")
-        sys.stdout.buffer.write(json.dumps(value, separators=(",", ":")).encode("utf-8"))
-        ' "$ci_build_types_value")"
         fi
-        ci_source_path_value="${ci_source_path:-}"
-        ci_source_dir_value="${ci_source_dir:-}"
+        python3 "${action_repo_root}/script/ci_data.py" \
+          build-types-tsv "$ci_build_types_value" >/dev/null
+        ci_source_dir_value="${ci_source_dir:-${GITHUB_WORKSPACE}}"
         ci_build_script_value="${action_repo_root}/script/ci_build.sh"
+        ci_prepare_script_value="${action_repo_root}/script/ci_prepare.sh"
         ci_sdk_dir_value="${ci_sdk_dir:-${GITHUB_WORKSPACE}/SDK/${ci_platform_tag_value}}"
-        project_source_dir_value="${project_source_dir:-}"
         if [[ "${{ inputs.profile }}" == 'downstream' ]]; then
           if [[ -z "$INPUT_PROJECT_DIR" ]]; then
             echo 'Error: project_dir is required for downstream builds.'
             exit 1
           fi
           if [[ "$INPUT_PROJECT_DIR" = /* || "$INPUT_PROJECT_DIR" =~ ^[A-Za-z]:[/\\] ]]; then
-            project_source_dir_value="$INPUT_PROJECT_DIR"
+            ci_source_dir_value="$INPUT_PROJECT_DIR"
           else
-            project_source_dir_value="${GITHUB_WORKSPACE}/${INPUT_PROJECT_DIR}"
+            ci_source_dir_value="${GITHUB_WORKSPACE}/${INPUT_PROJECT_DIR}"
           fi
-          if [[ ! -d "$project_source_dir_value" ]]; then
-            echo "Error: project directory does not exist: $project_source_dir_value"
+          if [[ ! -d "$ci_source_dir_value" ]]; then
+            echo "Error: project directory does not exist: $ci_source_dir_value"
             exit 1
-          fi
-
-          ci_source_path_value='.'
-          ci_source_dir_value="$project_source_dir_value"
-        else
-          project_source_dir_value="${project_source_dir_value:-${GITHUB_WORKSPACE}}"
-          if [[ -z "$ci_source_path_value" ]]; then
-            ci_source_path_value='.'
-          fi
-          if [[ -z "$ci_source_dir_value" ]]; then
-            ci_source_dir_value="${GITHUB_WORKSPACE}/${ci_source_path_value}"
           fi
         fi
 
@@ -154,20 +135,17 @@ runs:
           printf 'ci_platform_tag=%s\n' "$ci_platform_tag_value"
           printf 'ci_build_types=%s\n' "$ci_build_types_value"
           printf 'ci_workspace_dir=%s\n' "${ci_workspace_dir:-${GITHUB_WORKSPACE}}"
-          printf 'ci_support_dir=%s\n' "$action_repo_root"
-          printf 'ci_source_path=%s\n' "$ci_source_path_value"
           printf 'ci_source_dir=%s\n' "$ci_source_dir_value"
           printf 'ci_build_script=%s\n' "$ci_build_script_value"
+          printf 'ci_prepare_script=%s\n' "$ci_prepare_script_value"
           printf 'ci_build_dir=%s\n' "${ci_build_dir:-${GITHUB_WORKSPACE}/rbfx-build/${ci_platform_tag_value}}"
           printf 'ci_sdk_dir=%s\n' "$ci_sdk_dir_value"
-          printf 'project_source_dir=%s\n' "$project_source_dir_value"
-          printf 'project_build_dir=%s\n' "${project_build_dir:-${GITHUB_WORKSPACE}/project-build/${ci_platform_tag_value}}"
         } >> "$GITHUB_ENV"
 
     - name: Setup environment
       shell: bash
       run: |
-        "$ci_build_script" setup-environment
+        "$ci_prepare_script" setup-environment
 
     - name: Checkout emsdk
       if: env.ci_platform == 'web'
@@ -181,7 +159,7 @@ runs:
       if: env.ci_platform == 'web'
       shell: bash
       run: |
-        "$ci_build_script" setup-emsdk
+        "$ci_prepare_script" setup-emsdk
 
     - name: Restore build cache
       if: inputs.profile == 'engine'
@@ -225,7 +203,7 @@ runs:
     - name: Dependencies
       shell: bash
       run: |
-        "$ci_build_script" dependencies
+        "$ci_prepare_script" dependencies
 
     - name: Resolve CMake prefix path
       id: prefixes
@@ -235,7 +213,7 @@ runs:
         INPUT_CMAKE_PREFIX_PATH: ${{ inputs.cmake_prefix_path }}
         INPUT_WORKSPACE_DIR: ${{ github.workspace }}
       run: |
-        "$ci_build_script" resolve-cmake-prefix-path
+        "$ci_prepare_script" resolve-cmake-prefix-path
 
     - name: Build swig
       if: >-
@@ -243,20 +221,20 @@ runs:
         ((env.ci_lib_type == 'dll' && env.ci_platform_group != 'desktop') || env.ci_platform == 'ios')
       shell: bash
       run: |
-        "$ci_build_script" build-swig
+        "$ci_prepare_script" build-swig
 
     - name: Setup PackageTool
       if: inputs.profile == 'engine' && env.ci_platform_group != 'desktop'
       shell: bash
       run: |
-        "$ci_build_script" setup-package-tool
+        "$ci_prepare_script" setup-package-tool
 
     - name: Generate
       id: generate
       if: inputs.profile == 'engine' && env.ci_platform != 'android'
       shell: bash
       run: |
-        "$ci_build_script" generate-detect-thirdparty --auto-pch true
+        "$ci_build_script" generate-engine
 
     - name: Export downstream build state
       if: inputs.profile == 'downstream'
