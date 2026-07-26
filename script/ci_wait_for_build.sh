@@ -6,7 +6,7 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$script_dir/ci_common.sh"
 
 job_name="${INPUT_JOB_NAME:-}"
-artifact_names_value="${INPUT_ARTIFACT_NAMES:-[]}"
+artifact_names_value="${INPUT_ARTIFACT_NAMES:-}"
 timeout_seconds="${INPUT_TIMEOUT_SECONDS:-3600}"
 artifact_grace_seconds="${INPUT_ARTIFACT_GRACE_SECONDS:-60}"
 repository="${INPUT_REPOSITORY:-${GITHUB_REPOSITORY:-}}"

@@ -95,8 +95,12 @@ def parse_json_mapping(raw_value: str) -> dict[str, str]:
         value = json.loads(raw_value)
     except json.JSONDecodeError as error:
         raise ValueError(f'invalid JSON object: {error}') from error
+    return validate_build_type_mapping(value)
+
+
+def validate_build_type_mapping(value: object) -> dict[str, str]:
     if not isinstance(value, dict) or not value:
-        raise ValueError('value must be a non-empty JSON object')
+        raise ValueError('value must be a non-empty build type map')
     if any(
         not isinstance(short_name, str)
         or not short_name
@@ -114,6 +118,35 @@ def parse_json_mapping(raw_value: str) -> dict[str, str]:
             'keys may not contain @'
         )
     return value
+
+
+def parse_build_type_mappings(raw_value: str) -> dict[str, str]:
+    if raw_value.lstrip().startswith(('{', '[')):
+        raise ValueError(
+            'build_types must contain one <short-name>:<configuration> '
+            'mapping per line, not JSON'
+        )
+
+    mappings: dict[str, str] = {}
+    for line_number, raw_line in enumerate(raw_value.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = [part.strip() for part in line.split(':', maxsplit=1)]
+        if len(parts) != 2 or any(not part for part in parts):
+            raise ValueError(
+                f'invalid build_types entry on line {line_number}: {raw_line!r}; '
+                'expected <short-name>:<configuration>'
+            )
+        short_name, configuration = parts
+        if short_name in mappings:
+            raise ValueError(
+                f'duplicate mapping on line {line_number}: {short_name}'
+            )
+        mappings[short_name] = configuration
+    if not mappings:
+        raise ValueError('build_types must contain at least one mapping')
+    return validate_build_type_mapping(mappings)
 
 
 def parse_build_type_rules(raw_value: str) -> dict[str, dict[str, str]]:
@@ -189,6 +222,13 @@ def normalize_build_types(raw_value: str) -> None:
     ))
 
 
+def normalize_build_type_lines(raw_value: str) -> None:
+    write_output(json.dumps(
+        parse_build_type_mappings(raw_value),
+        separators=(',', ':'),
+    ))
+
+
 def write_default_build_types(platform: str) -> None:
     write_output(json.dumps(
         default_build_types(platform),
@@ -208,19 +248,13 @@ def write_platform_tsv(platform_tag: str) -> None:
 
 
 def parse_list(kind: str, raw_value: str) -> None:
-    if raw_value.lstrip().startswith('['):
-        try:
-            values = json.loads(raw_value)
-        except json.JSONDecodeError as error:
-            raise ValueError(f'invalid JSON array: {error}') from error
-        if not isinstance(values, list):
-            raise ValueError('value must be a JSON array')
-    else:
-        values = [
-            line.strip()
-            for line in raw_value.splitlines()
-            if line.strip()
-        ]
+    if raw_value.lstrip().startswith(('[', '{')):
+        raise ValueError('value must contain one item per line, not JSON')
+    values = [
+        line.strip()
+        for line in raw_value.splitlines()
+        if line.strip()
+    ]
 
     forbidden = '\r\n\t;' if kind == 'paths' else '\r\n\t'
     label = 'paths' if kind == 'paths' else 'values'
@@ -257,6 +291,8 @@ def main(arguments: list[str]) -> None:
         build_types_tsv(values[0])
     elif command == 'normalize-build-types' and len(values) == 1:
         normalize_build_types(values[0])
+    elif command == 'normalize-build-type-lines' and len(values) == 1:
+        normalize_build_type_lines(values[0])
     elif command == 'default-build-types' and len(values) == 1:
         write_default_build_types(values[0])
     elif command == 'platform-tsv' and len(values) == 1:

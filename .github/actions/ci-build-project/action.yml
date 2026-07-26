@@ -6,9 +6,10 @@
 #    Validate the project directory. The build directory defaults to
 #    `project-build/<platform tag>`. Android also gets a default install directory;
 #    an empty install directory disables installation on other platforms.
-# 2. Resolve `build_types` as a short-name-to-configuration JSON map. An explicit
-#    action input wins, then matrix.ci_build_types, then the canonical platform
-#    defaults. Normalize and export the map for the build script.
+# 2. Resolve `build_types`, supplied one
+#    `<short-name>:<configuration>` mapping per line. An explicit action input wins,
+#    then matrix.ci_build_types, then the canonical platform defaults. Normalize and
+#    export the selected map for the build script.
 # 3. For non-Android targets, translate each `cmake_cache_vars` line into a `-D`
 #    argument, configure the project once with the prepared platform/toolchain/CMake
 #    prefixes, and build every mapped configuration sequentially. If installation is
@@ -40,9 +41,9 @@ inputs:
     default: ''
   build_types:
     description: >-
-      Optional resolved short-name-to-configuration JSON object. Empty uses
-      matrix.ci_build_types when present, otherwise the platform defaults. Every
-      mapped configuration is built sequentially.
+      Optional build types, one `<short-name>:<configuration>` mapping per line.
+      Empty uses matrix.ci_build_types when present, otherwise the platform defaults.
+      Every mapped configuration is built sequentially.
     required: false
     default: ''
   cmake_cache_vars:
@@ -71,7 +72,8 @@ runs:
         INPUT_PROJECT_SOURCE_DIR: ${{ inputs.project_dir }}
         INPUT_BUILD_DIR: ${{ inputs.build_dir }}
         INPUT_INSTALL_DIR: ${{ inputs.install_dir }}
-        INPUT_BUILD_TYPES: ${{ inputs.build_types || (matrix.ci_build_types && toJSON(matrix.ci_build_types)) || '' }}
+        INPUT_BUILD_TYPES: ${{ inputs.build_types }}
+        MATRIX_BUILD_TYPES: ${{ matrix.ci_build_types && toJSON(matrix.ci_build_types) || '' }}
       run: |
         ci_build_script="$GITHUB_ACTION_PATH/../../../script/ci_build.sh"
         ci_data_script="$GITHUB_ACTION_PATH/../../../script/ci_data.py"
@@ -111,7 +113,12 @@ runs:
         if [[ -n "$INPUT_BUILD_TYPES" ]]; then
           ci_build_types="$(
             python3 "$ci_data_script" \
-              normalize-build-types "$INPUT_BUILD_TYPES"
+              normalize-build-type-lines "$INPUT_BUILD_TYPES"
+          )"
+        elif [[ -n "$MATRIX_BUILD_TYPES" ]]; then
+          ci_build_types="$(
+            python3 "$ci_data_script" \
+              normalize-build-types "$MATRIX_BUILD_TYPES"
           )"
         else
           ci_build_types="$(

@@ -3,7 +3,7 @@
 #
 # Steps performed:
 # 1. Validate the job name, repository/run identity, timeout values, and the optional
-#    newline or JSON list of artifact names.
+#    artifact names supplied one per line.
 # 2. Poll the current workflow run attempt's jobs endpoint until an exact rendered job
 #    name appears and completes, or until the overall timeout expires. GitHub API
 #    errors fail immediately.
@@ -26,9 +26,9 @@ inputs:
     description: Exact rendered workflow job name to wait for.
     required: true
   artifact_names:
-    description: Optional run-unique artifact names to wait for after the job succeeds, one per line or as a JSON string array.
+    description: Optional run-unique artifact names to wait for after the job succeeds, one per line.
     required: false
-    default: '[]'
+    default: ''
   timeout_seconds:
     description: Maximum time to wait for the job.
     required: false

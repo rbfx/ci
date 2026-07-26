@@ -40,9 +40,9 @@ inputs:
     required: false
     default: ''
   cmake_prefix_path:
-    description: "CMake prefix directories, one per line or as a JSON string array. Relative paths are resolved against `github.workspace`; missing paths are ignored. Unix tool permissions stripped by artifact transfer are restored."
+    description: "CMake prefix directories, one per line. Relative paths are resolved against `github.workspace`; missing paths are ignored. Unix tool permissions stripped by artifact transfer are restored."
     required: false
-    default: '[]'
+    default: ''
 outputs:
   build_cache_hit:
     description: Cache hit state for downstream cache restore.

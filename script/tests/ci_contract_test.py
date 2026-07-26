@@ -105,7 +105,7 @@ class StructuredDataTest(unittest.TestCase):
             function(*arguments)
         return output.getvalue()
 
-    def test_build_type_json_is_validated(self) -> None:
+    def test_internal_build_type_json_is_validated(self) -> None:
         self.assertEqual(
             {'dbg': 'Debug', 'rel': 'Release'},
             ci_data.parse_json_mapping(
@@ -115,7 +115,7 @@ class StructuredDataTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             ci_data.parse_json_mapping('[]')
 
-    def test_build_type_json_is_compacted_for_github_environment(self) -> None:
+    def test_internal_build_type_json_is_compacted(self) -> None:
         self.assertEqual(
             '{"dbg":"Debug","rel":"Release"}\n',
             self.capture(
@@ -123,6 +123,17 @@ class StructuredDataTest(unittest.TestCase):
                 '{\n  "dbg": "Debug",\n  "rel": "Release"\n}',
             ),
         )
+
+    def test_multiline_build_types_are_compacted(self) -> None:
+        self.assertEqual(
+            '{"dbg":"Debug","android":":assembleDebug"}\n',
+            self.capture(
+                ci_data.normalize_build_type_lines,
+                'dbg:Debug\nandroid::assembleDebug\n',
+            ),
+        )
+        with self.assertRaises(ValueError):
+            ci_data.parse_build_type_mappings('{"dbg":"Debug"}')
 
     def test_structured_output_uses_lf_on_windows(self) -> None:
         output = BytesIO()
@@ -165,6 +176,14 @@ class StructuredDataTest(unittest.TestCase):
     def test_path_lists_reject_semicolons(self) -> None:
         with self.assertRaises(ValueError):
             ci_data.parse_list('paths', 'first;second')
+
+    def test_lists_use_one_item_per_line(self) -> None:
+        self.assertEqual(
+            'first\nsecond\n',
+            self.capture(ci_data.parse_list, 'strings', 'first\nsecond\n'),
+        )
+        with self.assertRaises(ValueError):
+            ci_data.parse_list('strings', '["first","second"]')
 
 
 class CompositeActionContractTest(unittest.TestCase):
@@ -214,11 +233,13 @@ class CompositeActionContractTest(unittest.TestCase):
         action = (
             self.ACTIONS / 'ci-build-project' / 'action.yml'
         ).read_text(encoding='utf-8')
+        self.assertIn('INPUT_BUILD_TYPES: ${{ inputs.build_types }}', action)
         self.assertIn(
-            'inputs.build_types || '
-            '(matrix.ci_build_types && toJSON(matrix.ci_build_types))',
+            'MATRIX_BUILD_TYPES: ${{ '
+            'matrix.ci_build_types && toJSON(matrix.ci_build_types)',
             action,
         )
+        self.assertIn('normalize-build-type-lines "$INPUT_BUILD_TYPES"', action)
         self.assertIn('default-build-types "$ci_platform"', action)
 
     def test_wait_for_build_contract(self) -> None:

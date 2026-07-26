@@ -151,7 +151,7 @@ setup-package-tool() {
 }
 
 resolve-cmake-prefix-path() {
-    local prefix_paths_value="${INPUT_CMAKE_PREFIX_PATH:-[]}"
+    local prefix_paths_value="${INPUT_CMAKE_PREFIX_PATH:-}"
     local workspace_dir="${INPUT_WORKSPACE_DIR:-${GITHUB_WORKSPACE:-${ci_workspace_dir:-}}}"
     local parsed_prefix_paths=''
     local prefix_path=''
