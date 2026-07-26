@@ -49,6 +49,10 @@ def build_types_tsv(raw_value: str) -> None:
         print(f'{short_name}\t{configuration}')
 
 
+def normalize_build_types(raw_value: str) -> None:
+    print(json.dumps(parse_json_mapping(raw_value), separators=(',', ':')))
+
+
 def select_platform_build_types(platform: str, raw_value: str) -> None:
     if platform not in SUPPORTED_PLATFORMS:
         raise ValueError(f'unsupported platform: {platform}')
@@ -136,6 +140,8 @@ def main(arguments: list[str]) -> None:
 
     if command == 'build-types-tsv' and len(values) == 1:
         build_types_tsv(values[0])
+    elif command == 'normalize-build-types' and len(values) == 1:
+        normalize_build_types(values[0])
     elif command == 'select-platform-build-types' and len(values) == 2:
         select_platform_build_types(values[0], values[1])
     elif command == 'parse-list' and len(values) == 2:

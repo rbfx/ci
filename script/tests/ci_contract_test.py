@@ -73,6 +73,15 @@ class StructuredDataTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             ci_data.parse_json_mapping('[]')
 
+    def test_build_type_json_is_compacted_for_github_environment(self) -> None:
+        self.assertEqual(
+            '{"dbg":"Debug","rel":"Release"}\n',
+            self.capture(
+                ci_data.normalize_build_types,
+                '{\n  "dbg": "Debug",\n  "rel": "Release"\n}',
+            ),
+        )
+
     def test_platform_mapping_prefers_platform_entries(self) -> None:
         self.assertEqual(
             '{"benchmark":"bundleBenchmark"}\n',

@@ -95,8 +95,10 @@ runs:
             ci_build_types_value='{"dbg":"Debug","rel":"RelWithDebInfo"}'
           fi
         fi
-        python3 "${action_repo_root}/script/ci_data.py" \
-          build-types-tsv "$ci_build_types_value" >/dev/null
+        ci_build_types_value="$(
+          python3 "${action_repo_root}/script/ci_data.py" \
+            normalize-build-types "$ci_build_types_value"
+        )"
         ci_source_dir_value="${ci_source_dir:-${GITHUB_WORKSPACE}}"
         ci_build_script_value="${action_repo_root}/script/ci_build.sh"
         ci_prepare_script_value="${action_repo_root}/script/ci_prepare.sh"
