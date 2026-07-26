@@ -5,7 +5,8 @@ import re
 import sys
 import unittest
 from contextlib import redirect_stdout
-from io import StringIO
+from io import BytesIO, StringIO
+from unittest.mock import patch
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -81,6 +82,13 @@ class StructuredDataTest(unittest.TestCase):
                 '{\n  "dbg": "Debug",\n  "rel": "Release"\n}',
             ),
         )
+
+    def test_structured_output_uses_lf_on_windows(self) -> None:
+        output = BytesIO()
+        stream = type('BinaryStream', (), {'buffer': output})()
+        with patch.object(ci_data.sys, 'stdout', stream):
+            ci_data.write_output('dbg\tDebug')
+        self.assertEqual(b'dbg\tDebug\n', output.getvalue())
 
     def test_platform_mapping_prefers_platform_entries(self) -> None:
         self.assertEqual(

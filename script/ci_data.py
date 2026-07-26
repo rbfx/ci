@@ -20,6 +20,16 @@ SUPPORTED_PLATFORMS = {
 }
 
 
+def write_output(value: str) -> None:
+    """Write UTF-8 with LF endings, including when invoked from Git Bash."""
+    output = value + ('\n' if value else '')
+    binary_stream = getattr(sys.stdout, 'buffer', None)
+    if binary_stream is None:
+        sys.stdout.write(output)
+    else:
+        binary_stream.write(output.encode('utf-8'))
+
+
 def parse_json_mapping(raw_value: str) -> dict[str, str]:
     try:
         value = json.loads(raw_value)
@@ -45,12 +55,17 @@ def parse_json_mapping(raw_value: str) -> dict[str, str]:
 
 
 def build_types_tsv(raw_value: str) -> None:
-    for short_name, configuration in parse_json_mapping(raw_value).items():
-        print(f'{short_name}\t{configuration}')
+    write_output('\n'.join(
+        f'{short_name}\t{configuration}'
+        for short_name, configuration in parse_json_mapping(raw_value).items()
+    ))
 
 
 def normalize_build_types(raw_value: str) -> None:
-    print(json.dumps(parse_json_mapping(raw_value), separators=(',', ':')))
+    write_output(json.dumps(
+        parse_json_mapping(raw_value),
+        separators=(',', ':'),
+    ))
 
 
 def select_platform_build_types(platform: str, raw_value: str) -> None:
@@ -91,7 +106,7 @@ def select_platform_build_types(platform: str, raw_value: str) -> None:
         raise ValueError(
             f'no build configurations are defined for platform {platform!r}'
         )
-    print(json.dumps(mappings, separators=(',', ':')))
+    write_output(json.dumps(mappings, separators=(',', ':')))
 
 
 def parse_list(kind: str, raw_value: str) -> None:
@@ -122,15 +137,17 @@ def parse_list(kind: str, raw_value: str) -> None:
             + (' or semicolons' if kind == 'paths' else '')
         )
     if values:
-        print('\n'.join(values))
+        write_output('\n'.join(values))
 
 
 def iso_to_epoch(value: str) -> None:
-    print(int(datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp()))
+    write_output(str(int(
+        datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp()
+    )))
 
 
 def get_build_type(raw_value: str, short_name: str, default: str) -> None:
-    print(parse_json_mapping(raw_value).get(short_name, default))
+    write_output(parse_json_mapping(raw_value).get(short_name, default))
 
 
 def main(arguments: list[str]) -> None:
