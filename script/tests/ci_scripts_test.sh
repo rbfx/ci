@@ -153,8 +153,11 @@ test-custom-android-engine-sdk-install() {
     local workspace="$temp_dir/android-install"
     mkdir -p \
         "$workspace/source/android/.cxx/Benchmark/hash/arm64-v8a" \
+        "$workspace/source/android/.cxx/tools/debug/arm64-v8a" \
         "$workspace/build" \
         "$workspace/sdk"
+    touch \
+        "$workspace/source/android/.cxx/Benchmark/hash/arm64-v8a/cmake_install.cmake"
 
     ci_platform=android \
     ci_arch=arm64 \
@@ -171,6 +174,9 @@ test-custom-android-engine-sdk-install() {
 
     assert-contains "$MOCK_COMMAND_LOG" '--config Benchmark'
     assert-contains "$MOCK_COMMAND_LOG" '--component ThirdParty'
+    if grep -F -- '.cxx/tools/debug' "$MOCK_COMMAND_LOG" >/dev/null; then
+        fail 'Android tools directory was treated as an install tree'
+    fi
 }
 
 test-platform-cmake-arguments() {

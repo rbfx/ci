@@ -260,10 +260,11 @@ install-android-build-artifacts() {
     if [[ -d "$cxx_root" ]]; then
         mapfile -t install_dirs < <(
             find "$cxx_root" \
-                -mindepth 3 \
-                -maxdepth 3 \
-                -type d \
-                -name "$android_abi" \
+                -mindepth 4 \
+                -maxdepth 4 \
+                -type f \
+                -path "*/$android_abi/cmake_install.cmake" \
+                -printf '%h\n' \
                 | sort
         )
     fi
