@@ -151,13 +151,16 @@ test-engine-sdk-install() {
 test-custom-android-engine-sdk-install() {
     reset-command-log
     local workspace="$temp_dir/android-install"
+    local cmake_build_dir="$workspace/source/android/.cxx/generated/by/gradle"
     mkdir -p \
-        "$workspace/source/android/.cxx/Benchmark/hash/arm64-v8a" \
-        "$workspace/source/android/.cxx/tools/debug/arm64-v8a" \
+        "$workspace/source/android/.cxx/tools/debug/helper" \
         "$workspace/build" \
         "$workspace/sdk"
-    touch \
-        "$workspace/source/android/.cxx/Benchmark/hash/arm64-v8a/cmake_install.cmake"
+    PATH="$system_path" cmake \
+        -S "$repo_root/script/tests/fixtures/minimal-project" \
+        -B "$cmake_build_dir" \
+        -DCMAKE_BUILD_TYPE=Benchmark \
+        >/dev/null
 
     ci_platform=android \
     ci_arch=arm64 \
@@ -172,10 +175,13 @@ test-custom-android-engine-sdk-install() {
     ci_build_types='{"benchmark":"bundleBenchmark"}' \
         "$repo_root/script/ci_build.sh" install-engine-sdk
 
-    assert-contains "$MOCK_COMMAND_LOG" '--config Benchmark'
+    assert-contains "$MOCK_COMMAND_LOG" "cmake --install $cmake_build_dir"
     assert-contains "$MOCK_COMMAND_LOG" '--component ThirdParty'
     if grep -F -- '.cxx/tools/debug' "$MOCK_COMMAND_LOG" >/dev/null; then
         fail 'Android tools directory was treated as an install tree'
+    fi
+    if grep -F -- '--config' "$MOCK_COMMAND_LOG" >/dev/null; then
+        fail 'Android CMake configuration was inferred from its build path'
     fi
 }
 

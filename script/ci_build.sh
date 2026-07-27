@@ -248,36 +248,25 @@ install-build-artifacts() {
 }
 
 install-android-build-artifacts() {
-    local android_abi="$ci_arch"
-    case "$ci_arch" in
-        arm) android_abi=armeabi-v7a ;;
-        arm64) android_abi=arm64-v8a ;;
-        x64) android_abi=x86_64 ;;
-    esac
-
     local cxx_root="$ci_source_dir/android/.cxx"
     local -a install_dirs=()
     if [[ -d "$cxx_root" ]]; then
         mapfile -t install_dirs < <(
             find "$cxx_root" \
-                -mindepth 4 \
-                -maxdepth 4 \
                 -type f \
-                -path "*/$android_abi/cmake_install.cmake" \
+                -name CMakeCache.txt \
                 -printf '%h\n' \
                 | sort
         )
     fi
     if [[ ${#install_dirs[@]} -eq 0 ]]; then
-        echo "Error: no Android install directories found for $android_abi"
+        echo "Error: no Android CMake build directories found under $cxx_root"
         return 1
     fi
 
     local install_dir=''
     for install_dir in "${install_dirs[@]}"; do
-        local relative_dir="${install_dir#"$cxx_root/"}"
-        local configuration="${relative_dir%%/*}"
-        cmake --install "$install_dir" --config "$configuration" "$@"
+        cmake --install "$install_dir" "$@"
     done
 }
 
