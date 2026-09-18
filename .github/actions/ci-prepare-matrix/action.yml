@@ -1,0 +1,57 @@
+# This action creates an rbfx CI job matrix and writtes it into GitHub Actions state.
+#
+# Operations:
+# 1. Select the requested platforms and build types, and apply the exclusions.
+# 2. Assign a GitHub runner and host platform to each target.
+# 3. Group build types by platform (default), or create one job for each build
+#    type (set `separate_build_types=true`).
+# 4. Assign target and host job names.
+# 5. Save the matrix as JSON.
+#
+# This action is optional. ci-prepare-platform and ci-build-project describe how
+# to use them without ci-prepare-matrix.
+#
+name: CI Prepare Matrix
+description: Prepare a grouped or per-build-type rbfx CI matrix.
+
+inputs:
+  platforms:
+    description: >-
+      Platform selectors, one per line. Use `all`, a platform name such as `linux`,
+      or an exact platform tag. Append `@<short-name>` to select one configured build
+      type. Prefix a selector with `-` to exclude it.
+    required: false
+    default: all
+  build_types:
+    description: >-
+      Optional build-type rules, one
+      `<platform|*>:<short-name>:<configuration>` mapping per line.
+      Platform rules replace the `*` defaults for that platform. Empty uses Debug and
+      RelWithDebInfo, with assembleDebug and assembleRelease for Android.
+    required: false
+    default: ''
+  separate_build_types:
+    description: >-
+      When true, emit one job per platform/build type. When false, emit one job per
+      platform with all selected build types in matrix.ci_build_types.
+    required: false
+    default: 'false'
+
+outputs:
+  matrix:
+    description: >-
+      JSON matrix with ci_platform_tag, ci_host_platform_tag, ci_job_name,
+      ci_host_job_name, runs_on, ci_build_type, and resolved ci_build_types fields.
+    value: ${{ steps.prepare.outputs.matrix }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate inputs and prepare matrix
+      id: prepare
+      shell: bash
+      env:
+        INPUT_PLATFORMS: ${{ inputs.platforms }}
+        INPUT_BUILD_TYPES: ${{ inputs.build_types }}
+        INPUT_SEPARATE_BUILD_TYPES: ${{ inputs.separate_build_types }}
+      run: python3 "$GITHUB_ACTION_PATH/../../../script/ci_prepare_matrix.py"

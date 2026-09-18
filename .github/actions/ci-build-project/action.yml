@@ -1,0 +1,175 @@
+# This action builds one downstream project in the prepared platform environment.
+# Run ci-prepare-platform before this action. Caller is responsible for
+# project/framework source code checkout and/or framework SDK download.
+#
+# Operations:
+# 1. Configure a non-Android project with CMake.
+# 2. Build each selected CMake configuration or run each selected Android Gradle task.
+#   - Configurations are selected by:
+#     - The `ci-prepare-matrix` action, if used.
+#     - The `build_types` input, if present.
+# 3. Install each CMake configuration when requested, or collect the Android outputs.
+# 4. Save the compiler cache when required.
+# 5. Return the build and install directories.
+#
+# Build types may be customized by specifying `build_types` input parameter. This is
+# required when ci-prepare-matrix is not used.
+#
+name: CI Build Project
+description: Build and optionally install a downstream project using the environment prepared by ci-prepare-platform.
+
+inputs:
+  project_dir:
+    description: "Downstream project root, absolute or relative to `github.workspace`."
+    required: true
+  build_dir:
+    description: "Build directory, absolute or relative to `github.workspace`. Defaults to the prepared platform-specific project build directory."
+    required: false
+    default: ''
+  install_dir:
+    description: "Optional install directory, absolute or relative to `github.workspace`. Empty disables installation for non-Android builds; Android defaults to the prepared platform-specific project install directory."
+    required: false
+    default: ''
+  build_types:
+    description: >-
+      Optional build types, one `<short-name>:<configuration>` mapping per line.
+      Empty uses matrix.ci_build_types when present, otherwise the platform defaults.
+      Every mapped configuration is built sequentially.
+    required: false
+    default: ''
+  cmake_cache_vars:
+    description: "CMake cache variables to pass to the configure step, one `NAME=VALUE` or `NAME:TYPE=VALUE` per line."
+    required: false
+    default: ''
+  android_dir:
+    description: "Path to the downstream Android Gradle project, relative to `project_dir`."
+    required: false
+    default: ''
+outputs:
+  build_dir:
+    description: Resolved project build directory.
+    value: ${{ steps.paths.outputs.build_dir }}
+  install_dir:
+    description: Resolved install directory, including collected Android outputs.
+    value: ${{ steps.paths.outputs.install_dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve build paths
+      id: paths
+      shell: bash
+      env:
+        INPUT_PROJECT_SOURCE_DIR: ${{ inputs.project_dir }}
+        INPUT_BUILD_DIR: ${{ inputs.build_dir }}
+        INPUT_INSTALL_DIR: ${{ inputs.install_dir }}
+        INPUT_BUILD_TYPES: ${{ inputs.build_types }}
+        MATRIX_BUILD_TYPES: ${{ matrix.ci_build_types && toJSON(matrix.ci_build_types) || '' }}
+      run: |
+        ci_build_script="$GITHUB_ACTION_PATH/../../../script/ci_build.sh"
+        ci_data_script="$GITHUB_ACTION_PATH/../../../script/ci_data.py"
+
+        resolve_workspace_path() {
+          local path="$1"
+          if [[ "$path" = /* || "$path" =~ ^[A-Za-z]:[/\\] ]]; then
+            printf '%s\n' "$path"
+          else
+            printf '%s/%s\n' "$GITHUB_WORKSPACE" "$path"
+          fi
+        }
+
+        project_source_dir="$(resolve_workspace_path "$INPUT_PROJECT_SOURCE_DIR")"
+        if [[ ! -d "$project_source_dir" ]]; then
+          echo "Error: project directory does not exist: $project_source_dir"
+          exit 1
+        fi
+
+        if [[ -n "$INPUT_BUILD_DIR" ]]; then
+          active_project_build_dir="$(resolve_workspace_path "$INPUT_BUILD_DIR")"
+        else
+          active_project_build_dir="${GITHUB_WORKSPACE}/project-build/${ci_platform_tag}"
+        fi
+
+        project_install_dir=''
+        if [[ -n "$INPUT_INSTALL_DIR" ]]; then
+          project_install_dir="$(resolve_workspace_path "$INPUT_INSTALL_DIR")"
+        elif [[ "${ci_platform:-}" == 'android' ]]; then
+          project_install_dir="${GITHUB_WORKSPACE}/project-install/${ci_platform_tag}"
+        fi
+
+        if [[ -z "${ci_platform:-}" ]]; then
+          echo 'Error: ci-prepare-platform must run before ci-build-project.'
+          exit 1
+        fi
+        if [[ -n "$INPUT_BUILD_TYPES" ]]; then
+          ci_build_types="$(
+            python3 "$ci_data_script" \
+              normalize-build-type-lines "$INPUT_BUILD_TYPES"
+          )"
+        elif [[ -n "$MATRIX_BUILD_TYPES" ]]; then
+          ci_build_types="$(
+            python3 "$ci_data_script" \
+              normalize-build-types "$MATRIX_BUILD_TYPES"
+          )"
+        else
+          ci_build_types="$(
+            python3 "$ci_data_script" \
+              default-build-types "$ci_platform"
+          )"
+        fi
+
+        {
+          printf 'ci_build_script=%s\n' "$ci_build_script"
+          printf 'project_source_dir=%s\n' "$project_source_dir"
+          printf 'ci_active_project_build_dir=%s\n' "$active_project_build_dir"
+          printf 'ci_project_install_dir=%s\n' "$project_install_dir"
+          printf 'ci_build_types=%s\n' "$ci_build_types"
+        } >> "$GITHUB_ENV"
+        {
+          printf 'build_dir=%s\n' "$active_project_build_dir"
+          printf 'install_dir=%s\n' "$project_install_dir"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Build downstream project
+      if: env.ci_platform != 'android'
+      shell: bash
+      env:
+        INPUT_CMAKE_CACHE_VARS: ${{ inputs.cmake_cache_vars }}
+      run: |
+        args=(build-project --build-dir "$ci_active_project_build_dir")
+        if [[ -n "$ci_project_install_dir" ]]; then
+          args+=(--install-dir "$ci_project_install_dir")
+        fi
+        cmake_args=()
+        while IFS= read -r cmake_cache_var || [[ -n "$cmake_cache_var" ]]; do
+          cmake_cache_var="${cmake_cache_var%$'\r'}"
+          if [[ -n "$cmake_cache_var" ]]; then
+            cmake_args+=("-D$cmake_cache_var")
+          fi
+        done <<< "$INPUT_CMAKE_CACHE_VARS"
+        "$ci_build_script" "${args[@]}" "$project_source_dir" -- "${cmake_args[@]}"
+
+    - name: Build downstream Android project
+      if: env.ci_platform == 'android'
+      shell: bash
+      env:
+        INPUT_ANDROID_DIR: ${{ inputs.android_dir }}
+      run: |
+        args=(build-android-project)
+        android_project_dir="$project_source_dir/$INPUT_ANDROID_DIR"
+        "$ci_build_script" "${args[@]}" "$android_project_dir"
+
+        gradle_output_dir="$android_project_dir/build/outputs"
+        if [[ ! -d "$gradle_output_dir" ]]; then
+          echo "Error: Android Gradle output directory does not exist: $gradle_output_dir"
+          exit 1
+        fi
+        mkdir -p "$ci_project_install_dir/android"
+        cp -R "$gradle_output_dir"/. "$ci_project_install_dir/android/"
+
+    - name: Save build cache
+      if: ${{ !cancelled() && env.ci_build_cache_hit != 'true' }}
+      uses: actions/cache/save@v5
+      with:
+        path: ${{ env.CCACHE_DIR || format('{0}/.ccache', github.workspace) }}
+        key: ${{ env.ci_cache_id }}-${{ github.sha }}

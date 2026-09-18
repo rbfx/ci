@@ -1,0 +1,183 @@
+# This action prepares one platform for an engine or downstream build. It installs
+# dependencies and sets up environment. It does not build anything.
+#
+# Operations:
+# 1. Prepare the CI environment for the target platform.
+# 2. Install the Web SDK when required.
+# 3. Restore the compiler cache.
+# 4. Install the required build tools and system dependencies.
+# 5. For downstream builds, prepare the framework, SDK, and toolchain search paths.
+# 6. For engine cross-builds, prepare the required host tools.
+# 7. For non-Android engine builds, generate the CMake build tree.
+# 8. Return the cache status, ThirdParty reuse status, and CMake prefix path.
+#
+# Suppy `ci_platform_tag` when `ci-prepare-matrix` is not used.
+#
+name: CI Prepare Platform
+description: Shared toolchain, dependency, cache, and CMake-prefix preparation for engine and downstream CI jobs.
+
+inputs:
+  profile:
+    description: "Workflow profile. Supported values: `engine`, `downstream`."
+    required: true
+  ci_platform_tag:
+    description: "Optional rbfx CI platform tag override. Defaults to `matrix.ci_platform_tag`, then the `ci_platform_tag` environment variable."
+    required: false
+    default: ''
+  cmake_prefix_path:
+    description: "CMake prefix directories, one per line. Relative paths are resolved against `github.workspace`; missing paths are ignored. Unix tool permissions stripped by artifact transfer are restored."
+    required: false
+    default: ''
+outputs:
+  build_cache_hit:
+    description: Cache hit state for downstream cache restore.
+    value: ${{ steps.build_cache.outputs.cache-hit }}
+  engine_thirdparty_used:
+    description: Whether engine generate reused cached ThirdParty.
+    value: ${{ steps.generate.outputs.thirdparty_used }}
+  cmake_prefix_path:
+    description: Semicolon-separated existing CMake prefixes in caller order.
+    value: ${{ steps.prefixes.outputs.cmake_prefix_path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Initialize CI defaults
+      shell: bash
+      env:
+        INPUT_CI_PLATFORM_TAG: ${{ inputs.ci_platform_tag || matrix.ci_platform_tag || env.ci_platform_tag }}
+        DEFAULT_CCACHE_PREFIX: ${{ inputs.profile == 'downstream' && format('downstream-{0}', github.repository_id) || '' }}
+      run: |
+        action_repo_root="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
+        ci_platform_tag_value="${INPUT_CI_PLATFORM_TAG:-${ci_platform_tag:-}}"
+        ci_source_dir_value="${ci_source_dir:-${GITHUB_WORKSPACE}}"
+        ci_build_script_value="${action_repo_root}/script/ci_build.sh"
+        ci_prepare_script_value="${action_repo_root}/script/ci_prepare.sh"
+        ci_sdk_dir_value="${ci_sdk_dir:-${GITHUB_WORKSPACE}/SDK/${ci_platform_tag_value}}"
+
+        {
+          printf 'DOTNET_VERSION=%s\n' "${DOTNET_VERSION:-8.0}"
+          printf 'CMAKE_VERSION=%s\n' "${CMAKE_VERSION:-4.3.x}"
+          printf 'BINARYEN_CORES=%s\n' "${BINARYEN_CORES:-1}"
+          printf 'TRACY_TIMER_FALLBACK=%s\n' "${TRACY_TIMER_FALLBACK:-1}"
+          printf 'CCACHE_DIR=%s\n' "${CCACHE_DIR:-${GITHUB_WORKSPACE}/.ccache}"
+          printf 'CCACHE_COMPRESS=%s\n' "${CCACHE_COMPRESS:-true}"
+          printf 'CCACHE_COMPRESSLEVEL=%s\n' "${CCACHE_COMPRESSLEVEL:-9}"
+          printf 'CCACHE_DEPEND=%s\n' "${CCACHE_DEPEND:-true}"
+          printf 'CCACHE_HARDLINK=%s\n' "${CCACHE_HARDLINK:-true}"
+          printf 'CCACHE_SLOPPINESS=%s\n' "${CCACHE_SLOPPINESS:-pch_defines,time_macros,include_file_mtime,include_file_ctime}"
+          printf 'CCACHE_NOHASHDIR=%s\n' "${CCACHE_NOHASHDIR:-true}"
+          printf 'CCACHE_LIMIT_MULTIPLE=%s\n' "${CCACHE_LIMIT_MULTIPLE:-0.6}"
+          printf 'ccache_prefix=%s\n' "${ccache_prefix:-${DEFAULT_CCACHE_PREFIX}}"
+          printf 'ci_profile=%s\n' "${{ inputs.profile }}"
+          printf 'ci_platform_tag=%s\n' "$ci_platform_tag_value"
+          printf 'ci_workspace_dir=%s\n' "${ci_workspace_dir:-${GITHUB_WORKSPACE}}"
+          printf 'ci_source_dir=%s\n' "$ci_source_dir_value"
+          printf 'ci_build_script=%s\n' "$ci_build_script_value"
+          printf 'ci_prepare_script=%s\n' "$ci_prepare_script_value"
+          printf 'ci_build_dir=%s\n' "${ci_build_dir:-${GITHUB_WORKSPACE}/rbfx-build/${ci_platform_tag_value}}"
+          printf 'ci_sdk_dir=%s\n' "$ci_sdk_dir_value"
+        } >> "$GITHUB_ENV"
+
+    - name: Setup environment
+      shell: bash
+      run: |
+        "$ci_prepare_script" setup-environment
+
+    - name: Checkout emsdk
+      if: env.ci_platform == 'web'
+      uses: actions/checkout@v5
+      with:
+        repository: emscripten-core/emsdk
+        path: emsdk
+        fetch-depth: 1
+
+    - name: Setup emsdk
+      if: env.ci_platform == 'web'
+      shell: bash
+      run: |
+        "$ci_prepare_script" setup-emsdk
+
+    - name: Restore build cache
+      if: inputs.profile == 'engine'
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{ env.CCACHE_DIR || format('{0}/.ccache', github.workspace) }}
+        key: ${{ env.ci_cache_id }}-${{ env.ci_short_sha }}
+        restore-keys: |
+          ${{ env.ci_cache_id }}
+
+    - name: Restore build cache
+      if: inputs.profile == 'downstream'
+      id: build_cache
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{ env.CCACHE_DIR || format('{0}/.ccache', github.workspace) }}
+        key: ${{ env.ci_cache_id }}-${{ github.sha }}
+        restore-keys: |
+          ${{ env.ci_cache_id }}-
+          downstream-${{ github.repository_id }}-${{ env.ci_platform_tag }}-
+
+    - name: Setup dotnet
+      if: env.ci_lib_type == 'dll' || env.ci_platform == 'android'
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION || '8.0' }}
+
+    - name: Setup Gradle
+      if: env.ci_platform == 'android'
+      uses: gradle/actions/setup-gradle@v6
+      with:
+        gradle-version: '8.14.3'
+        add-job-summary: 'never'
+
+    - name: Setup cmake
+      if: env.ci_platform != 'android'
+      uses: jwlawson/actions-setup-cmake@v2
+      with:
+        cmake-version: ${{ env.CMAKE_VERSION || '4.3.x' }}
+
+    - name: Dependencies
+      shell: bash
+      run: |
+        "$ci_prepare_script" dependencies
+
+    - name: Resolve CMake prefix path
+      id: prefixes
+      if: inputs.profile == 'downstream'
+      shell: bash
+      env:
+        INPUT_CMAKE_PREFIX_PATH: ${{ inputs.cmake_prefix_path }}
+        INPUT_WORKSPACE_DIR: ${{ github.workspace }}
+      run: |
+        "$ci_prepare_script" resolve-cmake-prefix-path
+
+    - name: Build swig
+      if: >-
+        inputs.profile == 'engine' &&
+        ((env.ci_lib_type == 'dll' && env.ci_platform_group != 'desktop') || env.ci_platform == 'ios')
+      shell: bash
+      run: |
+        "$ci_prepare_script" build-swig
+
+    - name: Setup PackageTool
+      if: inputs.profile == 'engine' && env.ci_platform_group != 'desktop'
+      shell: bash
+      run: |
+        "$ci_prepare_script" setup-package-tool
+
+    # TODO: Consider moving out into engine's build.yml
+    - name: Generate
+      id: generate
+      if: inputs.profile == 'engine' && env.ci_platform != 'android'
+      shell: bash
+      run: |
+        "$ci_build_script" generate-engine
+
+    - name: Export downstream build state
+      if: inputs.profile == 'downstream'
+      shell: bash
+      run: |
+        {
+          printf 'ci_build_cache_hit=%s\n' "${{ steps.build_cache.outputs.cache-hit }}"
+        } >> "$GITHUB_ENV"
