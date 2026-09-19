@@ -42,7 +42,18 @@ class MatrixContractTest(unittest.TestCase):
         self.assertEqual(list(ci_data.PLATFORM_TAGS), [
             row['ci_platform_tag'] for row in grouped
         ])
-        self.assertTrue(all(len(row['ci_build_types']) == 2 for row in grouped))
+        self.assertEqual(
+            1,
+            len(next(
+                row for row in grouped
+                if row['ci_platform_tag'] == 'web-emscripten-wasm-lib'
+            )['ci_build_types']),
+        )
+        self.assertTrue(all(
+            len(row['ci_build_types']) == 2
+            for row in grouped
+            if row['ci_platform_tag'] != 'web-emscripten-wasm-lib'
+        ))
         self.assertTrue(all(row['ci_build_type'] == '' for row in grouped))
 
     def test_separate_build_types_have_same_resolved_map_contract(self) -> None:
@@ -52,8 +63,8 @@ class MatrixContractTest(unittest.TestCase):
         entries = matrix.resolve_selection(['all'], rules)
         separate = matrix.build_matrix(entries, True)['include']
 
-        self.assertEqual(40, len(separate))
-        self.assertEqual(40, len({
+        self.assertEqual(39, len(separate))
+        self.assertEqual(39, len({
             row['ci_job_name']
             for row in separate
         }))
@@ -157,6 +168,10 @@ class StructuredDataTest(unittest.TestCase):
         self.assertEqual(
             {'dbg': 'Debug', 'rel': 'RelWithDebInfo'},
             ci_data.default_build_types('linux'),
+        )
+        self.assertEqual(
+            {'rel': 'Release'},
+            ci_data.default_build_types('web'),
         )
         self.assertEqual(
             {'dbg': 'assembleDebug', 'rel': 'assembleRelease'},

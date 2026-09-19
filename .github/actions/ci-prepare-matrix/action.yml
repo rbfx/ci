@@ -27,7 +27,8 @@ inputs:
       Optional build-type rules, one
       `<platform|*>:<short-name>:<configuration>` mapping per line.
       Platform rules replace the `*` defaults for that platform. Empty uses Debug and
-      RelWithDebInfo, with assembleDebug and assembleRelease for Android.
+      RelWithDebInfo, with assembleDebug and assembleRelease for Android, and Release
+      for WebAssembly.
     required: false
     default: ''
   separate_build_types:

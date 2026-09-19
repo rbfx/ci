@@ -40,6 +40,7 @@ DEFAULT_BUILD_TYPE_RULES = """\
 *:rel:RelWithDebInfo
 android:dbg:assembleDebug
 android:rel:assembleRelease
+web:rel:Release
 """
 
 
