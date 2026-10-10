@@ -160,14 +160,6 @@ runs:
       run: |
         "$ci_prepare_script" resolve-cmake-prefix-path
 
-    - name: Build swig
-      if: >-
-        inputs.profile == 'engine' &&
-        ((env.ci_lib_type == 'dll' && env.ci_platform_group != 'desktop') || env.ci_platform == 'ios')
-      shell: bash
-      run: |
-        "$ci_prepare_script" build-swig
-
     - name: Setup PackageTool
       if: inputs.profile == 'engine' && env.ci_platform_group != 'desktop'
       shell: bash

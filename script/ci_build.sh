@@ -11,7 +11,6 @@ usage() {
     echo "  generate-engine       Generate the engine and report ThirdParty reuse"
     echo "  build-engine          Build all selected engine configurations"
     echo "  test-engine-native    Run native tests for selected configurations"
-    echo "  test-engine-managed   Run managed tests for selected configurations"
     echo "  install-engine-sdk    Install the complete engine SDK"
     echo "  test-project          Configure/test an engine consumer"
     echo "  build-project         Configure/build/install a downstream CMake project"
@@ -331,19 +330,6 @@ test-engine-native() {
     done
 }
 
-test-engine-managed() {
-    local build_type=''
-    for build_type in "${configured_build_type_ids[@]}"; do
-        local test_dir="$ci_build_dir/bin/${configured_build_type_names[$build_type]}"
-        if [[ -f "$test_dir/Urho3DNet.Tests.dll" ]]; then
-            (
-                cd "$test_dir"
-                dotnet test Urho3DNet.Tests.dll
-            )
-        fi
-    done
-}
-
 prepare-project-search-paths() {
     project_cmake_prefix_variable='CMAKE_PREFIX_PATH'
     project_cmake_prefix_value="${CI_CMAKE_PREFIX_PATH:-}"
@@ -562,7 +548,7 @@ build-android-project() {
 }
 
 case "$ci_action" in
-    generate-engine|build-engine|test-engine-native|test-engine-managed|\
+    generate-engine|build-engine|test-engine-native|\
     install-engine-sdk|test-project|build-project|build-android-project)
         initialize-build-context
         ;;
@@ -577,7 +563,6 @@ case "$ci_action" in
     generate-engine) generate-engine ;;
     build-engine) build-engine ;;
     test-engine-native) test-engine-native ;;
-    test-engine-managed) test-engine-managed ;;
     install-engine-sdk) install-engine-sdk ;;
     test-project) test-project ;;
     build-project) build-project ;;
