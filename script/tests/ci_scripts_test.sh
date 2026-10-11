@@ -50,6 +50,32 @@ test-setup-environment() {
     fi
 }
 
+test-setup-emsdk() {
+    reset-command-log
+    local workspace="$temp_dir/emsdk"
+    local emsdk_log="$workspace/commands.log"
+    mkdir -p "$workspace"
+    printf '%s\n' \
+        '#!/usr/bin/env bash' \
+        'printf "%s\\n" "$*" >> "$EMSDK_TEST_LOG"' \
+        > "$workspace/emsdk"
+    chmod +x "$workspace/emsdk"
+
+    ci_workspace_dir="$temp_dir" \
+    EMSDK_TEST_LOG="$emsdk_log" \
+        "$repo_root/script/ci_prepare.sh" setup-emsdk
+    assert-contains "$emsdk_log" 'install latest'
+    assert-contains "$emsdk_log" 'activate latest'
+
+    : > "$emsdk_log"
+    ci_workspace_dir="$temp_dir" \
+    EMSCRIPTEN_VERSION=3.1.57 \
+    EMSDK_TEST_LOG="$emsdk_log" \
+        "$repo_root/script/ci_prepare.sh" setup-emsdk
+    assert-contains "$emsdk_log" 'install 3.1.57'
+    assert-contains "$emsdk_log" 'activate 3.1.57'
+}
+
 test-generate-engine() {
     reset-command-log
     local workspace="$temp_dir/generate"
@@ -429,6 +455,7 @@ test-caller-audit() {
 }
 
 test-setup-environment
+test-setup-emsdk
 test-generate-engine
 test-downstream-linux-build
 test-downstream-android-custom-task

@@ -88,11 +88,12 @@ install-dependencies() {
 
 setup-emsdk() {
     local emsdk_dir="${1:-${ci_workspace_dir}/emsdk}"
+    local emscripten_version="${EMSCRIPTEN_VERSION:-latest}"
     emsdk_dir=$(normalize-path "$emsdk_dir")
 
     cd "$emsdk_dir"
-    ./emsdk install latest
-    ./emsdk activate latest
+    ./emsdk install "$emscripten_version"
+    ./emsdk activate "$emscripten_version"
 
     if [[ -n "${GITHUB_ENV:-}" ]]; then
         printf 'PATH=%s:%s:%s\n' "$PATH" "$emsdk_dir" "$emsdk_dir/upstream/emscripten" >> "$GITHUB_ENV"

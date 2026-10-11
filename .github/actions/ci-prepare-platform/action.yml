@@ -58,6 +58,7 @@ runs:
         {
           printf 'DOTNET_VERSION=%s\n' "${DOTNET_VERSION:-8.0}"
           printf 'CMAKE_VERSION=%s\n' "${CMAKE_VERSION:-4.3.x}"
+          printf 'EMSCRIPTEN_VERSION=%s\n' "${EMSCRIPTEN_VERSION:-latest}"
           printf 'BINARYEN_CORES=%s\n' "${BINARYEN_CORES:-1}"
           printf 'TRACY_TIMER_FALLBACK=%s\n' "${TRACY_TIMER_FALLBACK:-1}"
           printf 'CCACHE_DIR=%s\n' "${CCACHE_DIR:-${GITHUB_WORKSPACE}/.ccache}"
