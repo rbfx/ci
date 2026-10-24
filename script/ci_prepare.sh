@@ -57,7 +57,7 @@ install-dependencies() {
                 libgl1-mesa-dev libxcursor-dev libxi-dev libxinerama-dev \
                 libxrandr-dev libxrender-dev libxss-dev libasound2-dev \
                 libpulse-dev libibus-1.0-dev libdbus-1-dev libreadline6-dev \
-                libudev-dev uuid-dev libtbb-dev
+                libudev-dev uuid-dev libtbb-dev libxcb-glx0-dev
             ;;
         web)
             sudo apt-get update
