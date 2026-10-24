@@ -125,6 +125,13 @@ runs:
       with:
         dotnet-version: ${{ env.DOTNET_VERSION || '8.0' }}
 
+    - name: Setup Java
+      if: env.ci_platform == 'android'
+      uses: actions/setup-java@v5
+      with:
+        distribution: temurin
+        java-version: '21'
+
     - name: Setup Gradle
       if: env.ci_platform == 'android'
       uses: gradle/actions/setup-gradle@v6
