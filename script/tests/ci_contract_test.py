@@ -108,6 +108,19 @@ class MatrixContractTest(unittest.TestCase):
         self.assertEqual(4, len(entries))
         self.assertTrue(all(entry[1] == 'dbg' for entry in entries))
 
+    def test_runner_overrides_apply_to_matrix(self) -> None:
+        rules = ci_data.parse_build_type_rules(
+            ci_data.DEFAULT_BUILD_TYPE_RULES
+        )
+        entries = matrix.resolve_selection(['linux', 'uwp'], rules)
+        runner_rules = ci_data.parse_runner_rules('linux:ubuntu-24.04')
+        for separate in (False, True):
+            rows = matrix.build_matrix(entries, separate, runner_rules)
+            self.assertEqual(
+                {'ubuntu-24.04', 'windows-latest'},
+                {row['runs_on'] for row in rows['include']},
+            )
+
 
 class StructuredDataTest(unittest.TestCase):
     def capture(self, function, *arguments: str) -> str:
@@ -188,6 +201,83 @@ class StructuredDataTest(unittest.TestCase):
             ci_data.resolve_host_platform_tag('ios-clang-arm64-lib'),
         )
 
+    def test_default_runners(self) -> None:
+        self.assertEqual(
+            'windows-latest',
+            ci_data.resolve_runs_on('uwp-msvc-x64-dll'),
+        )
+        self.assertEqual(
+            'macos-latest',
+            ci_data.resolve_runs_on('ios-clang-arm64-lib'),
+        )
+        self.assertEqual(
+            'ubuntu-latest',
+            ci_data.resolve_runs_on('android-clang-arm64-dll'),
+        )
+
+    def test_runner_overrides_use_most_specific_selector(self) -> None:
+        overrides = ci_data.parse_runner_rules(
+            '*:self-hosted\n'
+            'macos:macos-15\n'
+            'macos-clang-x64-dll:macos-13\n'
+        )
+        self.assertEqual(
+            'macos-13',
+            ci_data.resolve_runs_on('macos-clang-x64-dll', overrides),
+        )
+        self.assertEqual(
+            'macos-15',
+            ci_data.resolve_runs_on('macos-clang-x64-lib', overrides),
+        )
+        self.assertEqual(
+            'self-hosted',
+            ci_data.resolve_runs_on('windows-msvc-x64-dll', overrides),
+        )
+
+    def test_runner_overrides_keep_other_defaults(self) -> None:
+        overrides = ci_data.parse_runner_rules('linux:ubuntu-24.04')
+        self.assertEqual(
+            'ubuntu-24.04',
+            ci_data.resolve_runs_on('linux-gcc-x64-dll', overrides),
+        )
+        self.assertEqual(
+            'ubuntu-latest',
+            ci_data.resolve_runs_on('web-emscripten-wasm-lib', overrides),
+        )
+        self.assertEqual(
+            'windows-latest',
+            ci_data.resolve_runs_on('windows-msvc-x64-dll', overrides),
+        )
+
+    def test_runner_labels(self) -> None:
+        self.assertEqual(
+            {
+                'windows': ['self-hosted', 'windows', 'x64'],
+                'linux': 'host:with:colons',
+            },
+            ci_data.parse_runner_rules(
+                'windows: self-hosted, windows, x64\n'
+                '\n'
+                'linux:host:with:colons\n'
+            ),
+        )
+        self.assertEqual({}, ci_data.parse_runner_rules(''))
+
+    def test_invalid_runner_rules(self) -> None:
+        for raw_value in (
+            'linux',
+            ':ubuntu-latest',
+            'linux:',
+            'linux:a,,b',
+            'freebsd:ubuntu-latest',
+            'linux@dbg:ubuntu-latest',
+            '-linux:ubuntu-latest',
+            'linux:a\nlinux:b',
+        ):
+            with self.subTest(raw_value=raw_value):
+                with self.assertRaises(ValueError):
+                    ci_data.parse_runner_rules(raw_value)
+
     def test_path_lists_reject_semicolons(self) -> None:
         with self.assertRaises(ValueError):
             ci_data.parse_list('paths', 'first;second')
@@ -217,7 +307,7 @@ class CompositeActionContractTest(unittest.TestCase):
     def test_prepare_matrix_contract(self) -> None:
         self.assert_contract(
             'ci-prepare-matrix',
-            {'platforms', 'build_types', 'separate_build_types'},
+            {'platforms', 'build_types', 'separate_build_types', 'runners'},
             {'matrix'},
         )
 

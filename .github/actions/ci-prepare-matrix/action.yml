@@ -2,7 +2,8 @@
 #
 # Operations:
 # 1. Select the requested platforms and build types, and apply the exclusions.
-# 2. Assign a GitHub runner and host platform to each target.
+# 2. Assign a GitHub runner and host platform to each target. The `runners`
+#    rules override the default runners.
 # 3. Group build types by platform (default), or create one job for each build
 #    type (set `separate_build_types=true`).
 # 4. Assign target and host job names.
@@ -37,6 +38,16 @@ inputs:
       platform with all selected build types in matrix.ci_build_types.
     required: false
     default: 'false'
+  runners:
+    description: >-
+      Optional runner overrides, one `<selector>:<label>[,<label>...]` rule per line.
+      A selector is `*`, a platform name such as `linux`, or an exact platform tag.
+      The most specific override wins, and all overrides win over the defaults.
+      More than one label gives a label array, for example
+      `windows:self-hosted,windows`. Defaults are windows-latest for Windows and UWP,
+      macos-latest for macOS and iOS, and ubuntu-latest for all other platforms.
+    required: false
+    default: ''
 
 outputs:
   matrix:
@@ -55,4 +66,5 @@ runs:
         INPUT_PLATFORMS: ${{ inputs.platforms }}
         INPUT_BUILD_TYPES: ${{ inputs.build_types }}
         INPUT_SEPARATE_BUILD_TYPES: ${{ inputs.separate_build_types }}
+        INPUT_RUNNERS: ${{ inputs.runners }}
       run: python3 "$GITHUB_ACTION_PATH/../../../script/ci_prepare_matrix.py"

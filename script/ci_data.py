@@ -42,6 +42,15 @@ android:dbg:assembleDebug
 android:rel:assembleRelease
 web:rel:Release
 """
+DEFAULT_RUNNER_RULES = """\
+*:ubuntu-latest
+windows:windows-latest
+uwp:windows-latest
+macos:macos-latest
+ios:macos-latest
+"""
+
+RunsOn = str | list[str]
 
 
 def write_output(value: str) -> None:
@@ -71,13 +80,48 @@ def platform_group(platform: str) -> str:
     raise ValueError(f'unsupported platform: {platform}')
 
 
-def resolve_runs_on(platform_tag: str) -> str:
+def parse_runner_rules(raw_value: str) -> dict[str, RunsOn]:
+    rules: dict[str, RunsOn] = {}
+    for line_number, raw_line in enumerate(raw_value.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        selector, separator, runner = line.partition(':')
+        selector = selector.strip()
+        labels = [label.strip() for label in runner.split(',')]
+        if not separator or not selector or any(not label for label in labels):
+            raise ValueError(
+                f'invalid runners entry on line {line_number}: {raw_line!r}; '
+                'expected <selector>:<label>[,<label>...]'
+            )
+        if (
+            selector != '*'
+            and selector not in SUPPORTED_PLATFORMS
+            and selector not in PLATFORM_TAGS
+        ):
+            raise ValueError(
+                f'unsupported runners selector on line {line_number}: '
+                f'{selector}'
+            )
+        if selector in rules:
+            raise ValueError(
+                f'duplicate runners selector on line {line_number}: {selector}'
+            )
+        rules[selector] = labels[0] if len(labels) == 1 else labels
+    return rules
+
+
+def resolve_runs_on(
+    platform_tag: str,
+    overrides: dict[str, RunsOn] | None = None,
+) -> RunsOn:
+    """Return the most specific override, then the most specific default."""
     platform, _compiler, _arch, _lib_type = parse_platform_tag(platform_tag)
-    if platform in {'windows', 'uwp'}:
-        return 'windows-latest'
-    if platform in {'macos', 'ios'}:
-        return 'macos-latest'
-    return 'ubuntu-latest'
+    for rules in (overrides or {}, parse_runner_rules(DEFAULT_RUNNER_RULES)):
+        for selector in (platform_tag, platform, '*'):
+            if selector in rules:
+                return rules[selector]
+    raise ValueError(f'no runner is defined for platform {platform_tag!r}')
 
 
 def resolve_host_platform_tag(platform_tag: str) -> str:

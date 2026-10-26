@@ -11,8 +11,10 @@ from ci_data import (
     DEFAULT_BUILD_TYPE_RULES,
     PLATFORM_TAGS,
     SUPPORTED_PLATFORMS,
+    RunsOn,
     parse_build_type_rules,
     parse_platform_tag,
+    parse_runner_rules,
     resolve_build_types,
     resolve_host_platform_tag,
     resolve_runs_on,
@@ -150,7 +152,11 @@ def resolve_selection(
     return entries
 
 
-def matrix_base(platform_tag: str, build_type: str = '') -> dict[str, str]:
+def matrix_base(
+    platform_tag: str,
+    runner_rules: dict[str, RunsOn],
+    build_type: str = '',
+) -> dict[str, object]:
     suffix = f'-{build_type}' if build_type else ''
     host_platform_tag = resolve_host_platform_tag(platform_tag)
     return {
@@ -158,19 +164,21 @@ def matrix_base(platform_tag: str, build_type: str = '') -> dict[str, str]:
         'ci_host_platform_tag': host_platform_tag,
         'ci_job_name': f'{platform_tag}{suffix}',
         'ci_host_job_name': f'{host_platform_tag}{suffix}',
-        'runs_on': resolve_runs_on(platform_tag),
+        'runs_on': resolve_runs_on(platform_tag, runner_rules),
     }
 
 
 def build_matrix(
     entries: list[MatrixEntry],
     separate_build_types: bool,
+    runner_rules: dict[str, RunsOn] | None = None,
 ) -> dict[str, list[dict[str, object]]]:
+    runner_rules = runner_rules or {}
     if separate_build_types:
         return {
             'include': [
                 {
-                    **matrix_base(platform_tag, short_name),
+                    **matrix_base(platform_tag, runner_rules, short_name),
                     'ci_build_type': short_name,
                     'ci_build_types': {short_name: configuration},
                 }
@@ -186,7 +194,7 @@ def build_matrix(
     return {
         'include': [
             {
-                **matrix_base(platform_tag),
+                **matrix_base(platform_tag, runner_rules),
                 'ci_build_type': '',
                 'ci_build_types': build_types,
             }
@@ -208,12 +216,14 @@ def main() -> None:
         build_type_rules = parse_build_type_rules(
             raw_build_types or DEFAULT_BUILD_TYPE_RULES
         )
+        runner_rules = parse_runner_rules(os.environ.get('INPUT_RUNNERS', ''))
     except ValueError as error:
         raise SystemExit(f'Error: {error}') from error
     entries = resolve_selection(requested_selectors, build_type_rules)
     write_matrix(build_matrix(
         entries,
         parse_bool('INPUT_SEPARATE_BUILD_TYPES'),
+        runner_rules,
     ))
 
 
