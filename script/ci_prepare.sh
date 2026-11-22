@@ -6,7 +6,7 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$script_dir/ci_common.sh"
 
 usage() {
-    echo "Usage: $0 <setup-environment|dependencies|setup-emsdk|build-swig|setup-package-tool|resolve-cmake-prefix-path>"
+    echo "Usage: $0 <setup-environment|dependencies|setup-emsdk|setup-package-tool|resolve-cmake-prefix-path>"
 }
 
 setup-environment() {
@@ -101,35 +101,6 @@ setup-emsdk() {
     else
         export PATH="$PATH:$emsdk_dir:$emsdk_dir/upstream/emscripten"
         export EMSDK="$emsdk_dir"
-    fi
-}
-
-build-swig() {
-    local processors="${ci_number_of_processors:-}"
-    if [[ -z "$processors" ]]; then
-        detect-processor-count
-        processors=$ci_number_of_processors
-    fi
-
-    local binary_dir="${ci_workspace_dir}/swig-build"
-    local exe=''
-    local swig_exe=''
-    cmake -S "${ci_source_dir}/Source/ThirdParty/swig" -B "$binary_dir" \
-        -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$binary_dir" \
-        -DCMAKE_BUILD_TYPE=Release -DDESKTOP=ON -DURHO3D_CSHARP=ON
-    cmake --build "$binary_dir" --config Release --parallel "$processors"
-
-    if [[ "$ci_platform" == 'uwp' ]]; then
-        exe='.exe'
-    fi
-    if [[ -f "$binary_dir/swig$exe" ]]; then
-        swig_exe="$binary_dir/swig$exe"
-    else
-        swig_exe="$binary_dir/Release/swig$exe"
-    fi
-    write-github-env SWIG_EXECUTABLE "$swig_exe"
-    if [[ -z "${GITHUB_ENV:-}" ]]; then
-        printf 'SWIG_EXECUTABLE=%s\n' "$swig_exe"
     fi
 }
 
@@ -274,7 +245,6 @@ case "$command" in
     setup-environment) setup-environment "$@" ;;
     dependencies) install-dependencies "$@" ;;
     setup-emsdk) setup-emsdk "$@" ;;
-    build-swig) build-swig "$@" ;;
     setup-package-tool) setup-package-tool "$@" ;;
     resolve-cmake-prefix-path) resolve-cmake-prefix-path "$@" ;;
     *)

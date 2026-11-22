@@ -6,7 +6,7 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$script_dir/ci_common.sh"
 
 usage() {
-    echo "Usage: $0 <download-cached-sdk|sanitize-cached-sdk|copy-cached-sdk|download-nuget-sdks|release-mobile-artifacts|publish-to-itch> [arguments]"
+    echo "Usage: $0 <download-cached-sdk|sanitize-cached-sdk|copy-cached-sdk|release-mobile-artifacts|publish-to-itch> [arguments]"
 }
 
 download-cached-sdk-archive() {
@@ -131,30 +131,6 @@ copy-cached-sdk() {
     echo "Cached SDK files copied successfully"
 }
 
-download-nuget-sdks() {
-    if [[ $# -ne 2 ]]; then
-        echo "Error: download-nuget-sdks requires <github_repository> <output_dir>"
-        return 1
-    fi
-    local github_repository=$1
-    local output_dir=$2
-    local -a platforms=(
-        windows-msvc-x64-dll
-        linux-gcc-x64-dll
-        macos-clang-x64-dll
-        macos-clang-arm64-dll
-        uwp-msvc-x64-dll
-    )
-    local platform=''
-    for platform in "${platforms[@]}"; do
-        local sdk_name="rebelfork-sdk-${platform}-latest.7z"
-        echo "Downloading $sdk_name..."
-        gh release download latest --repo "$github_repository" --pattern "$sdk_name" --dir .
-        7z x -y "$sdk_name" "${sdk_name%.7z}/bin/*" -o"$output_dir"
-        rm "$sdk_name"
-    done
-}
-
 release-mobile-artifacts() {
     if [[ -z "${GH_TOKEN:-}" ]]; then
         echo "No GH_TOKEN detected. Can't release artifacts."
@@ -216,7 +192,6 @@ case "$command" in
     download-cached-sdk) download-cached-sdk "$@" ;;
     sanitize-cached-sdk) sanitize-cached-sdk "$@" ;;
     copy-cached-sdk) copy-cached-sdk "$@" ;;
-    download-nuget-sdks) download-nuget-sdks "$@" ;;
     release-mobile-artifacts) release-mobile-artifacts "$@" ;;
     publish-to-itch) publish-to-itch "$@" ;;
     *)
